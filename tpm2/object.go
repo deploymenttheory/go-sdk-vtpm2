@@ -16,16 +16,24 @@ func isStorageKey(attrs uint32) bool {
 	return attrs&ObjRestricted != 0 && attrs&ObjDecrypt != 0
 }
 
+// qualifiedNameOf computes an object's Qualified Name, QN = H_nameAlg(parentQN ‖
+// Name) (TPM 2.0 Part 1, §26.5). For a primary the parent QN is the hierarchy
+// handle (the Name of a permanent handle).
+func qualifiedNameOf(nameAlg uint16, parentQN, name []byte) []byte {
+	return hashSum(nameAlg, parentQN, name)
+}
+
 // derivePrimary fills the unique (public) and secret (sensitive) of an object
 // derived from primarySeed for the given template. The derivation is
 // deterministic in (primarySeed, template), so the object is reproducible.
 func derivePrimary(primarySeed []byte, tmpl public, userAuth []byte) (*object, []byte) {
-	// Seed the deterministic reader with the hierarchy seed and the template, so
-	// different templates/hierarchies yield independent keys.
+	// Instantiate a Hash_DRBG seeded with the primary seed, the template hash and a
+	// use string (TPM 2.0 Part 1, §24.6.3), so different templates/hierarchies yield
+	// independent keys and the same inputs always reproduce the same key.
 	var tb writer
 	tmpl.marshal(&tb)
-	seed := hashSum(tmpl.NameAlg, primarySeed, tb.bytes())
-	r := &detReader{alg: tmpl.NameAlg, seed: seed}
+	templateHash := hashSum(tmpl.NameAlg, tb.bytes())
+	r := newHashDRBG(tmpl.NameAlg, primarySeed, templateHash, []byte("CreatePrimary"))
 
 	pub := tmpl
 	sens := sensitive{Type: tmpl.Type, AuthValue: append([]byte(nil), userAuth...)}
@@ -47,7 +55,7 @@ func derivePrimary(primarySeed []byte, tmpl public, userAuth []byte) (*object, [
 		if curve == nil {
 			return nil, errorResponse(withParam(RCValue, 2))
 		}
-		x, y, d, err := deriveECCKey(r, curve)
+		x, y, d, err := deriveECCKey(r, curve, tmpl.Curve)
 		if err != nil {
 			return nil, errorResponse(RCKey)
 		}
@@ -73,14 +81,14 @@ func derivePrimary(primarySeed []byte, tmpl public, userAuth []byte) (*object, [
 // ticketHierarchy is the hierarchy stamped into the ticket; parentName and
 // parentNameAlg describe the creating parent (a hierarchy handle with NULL alg
 // for a primary, or the parent object's Name and nameAlg for a child).
-func (t *TPM) buildCreationData(ticketHierarchy uint32, nameAlg uint16, name, proof, parentName []byte, parentNameAlg uint16, pcrs []pcrSelection, outsideInfo []byte) (data, hashOut, ticket []byte) {
+func (t *TPM) buildCreationData(ticketHierarchy uint32, nameAlg uint16, name, proof, parentName, parentQN []byte, parentNameAlg uint16, pcrs []pcrSelection, outsideInfo []byte) (data, hashOut, ticket []byte) {
 	var cd writer
 	writePCRSelectionList(&cd, pcrs)              // pcrSelect
 	cd.tpm2b(t.pcrSelectionDigest(nameAlg, pcrs)) // pcrDigest
 	cd.u8(0)                                      // locality
 	cd.u16(parentNameAlg)                         // parentNameAlg
 	cd.tpm2b(parentName)                          // parentName
-	cd.tpm2b(parentName)                          // parentQualifiedName
+	cd.tpm2b(parentQN)                            // parentQualifiedName
 	cd.tpm2b(outsideInfo)                         // outsideInfo
 	inner := cd.bytes()
 
@@ -138,12 +146,15 @@ func (t *TPM) cmdCreatePrimary(tag uint16, r *reader) []byte {
 	if derr != nil {
 		return derr
 	}
+	// A primary's parent is the hierarchy, whose Qualified Name is its handle.
+	parentQN := permanentName(primaryHandle)
+	o.qualifiedName = qualifiedNameOf(tmpl.NameAlg, parentQN, o.name)
 	handle, ok := t.objects.loadTransient(o)
 	if !ok {
 		return errorResponse(RCObjectMemory)
 	}
 
-	creationData, creationHash, ticket := t.buildCreationData(primaryHandle, tmpl.NameAlg, o.name, hi.seed, permanentName(primaryHandle), AlgNull, pcrs, outsideInfo)
+	creationData, creationHash, ticket := t.buildCreationData(primaryHandle, tmpl.NameAlg, o.name, t.hierarchyProof(primaryHandle), parentQN, parentQN, AlgNull, pcrs, outsideInfo)
 
 	var w writer
 	o.public.marshal2B(&w) // outPublic
@@ -241,7 +252,7 @@ func createChild(tmpl public, userAuth, data []byte, rng io.Reader) (*object, []
 		if curve == nil {
 			return nil, errorResponse(withParam(RCValue, 2))
 		}
-		x, y, d, err := deriveECCKey(rng, curve)
+		x, y, d, err := deriveECCKey(rng, curve, tmpl.Curve)
 		if err != nil {
 			return nil, errorResponse(RCKey)
 		}
@@ -304,8 +315,8 @@ func (t *TPM) cmdCreate(tag uint16, r *reader) []byte {
 	if derr != nil {
 		return derr
 	}
-	outPrivate := wrapSensitive(parent, &child.sensitive, child.name)
-	creationData, creationHash, ticket := t.buildCreationData(RHNull, tmpl.NameAlg, child.name, parent.sensitive.SeedValue, parent.name, parent.public.NameAlg, pcrs, outsideInfo)
+	outPrivate := wrapSensitive(parent, &child.sensitive, child.name, t.rand)
+	creationData, creationHash, ticket := t.buildCreationData(RHNull, tmpl.NameAlg, child.name, proofFromSeed(parent.sensitive.SeedValue), parent.name, parent.qualifiedName, parent.public.NameAlg, pcrs, outsideInfo)
 
 	var w writer
 	w.raw(outPrivate)          // outPrivate (TPM2B_PRIVATE)
@@ -347,6 +358,7 @@ func (t *TPM) cmdLoad(tag uint16, r *reader) []byte {
 		return errorResponse(RCIntegrity) // wrong parent or tampered blob
 	}
 	o := &object{public: inPublic, sensitive: *sens, name: childName}
+	o.qualifiedName = qualifiedNameOf(inPublic.NameAlg, parent.qualifiedName, childName)
 	handle, ok := t.objects.loadTransient(o)
 	if !ok {
 		return errorResponse(RCObjectMemory)
@@ -385,7 +397,7 @@ func (t *TPM) cmdObjectChangeAuth(tag uint16, r *reader) []byte {
 
 	newSens := obj.sensitive
 	newSens.AuthValue = append([]byte(nil), newAuth...)
-	outPrivate := wrapSensitive(parent, &newSens, obj.name)
+	outPrivate := wrapSensitive(parent, &newSens, obj.name, t.rand)
 
 	var w writer
 	w.raw(outPrivate) // outPrivate (TPM2B_PRIVATE)
@@ -402,6 +414,9 @@ func (t *TPM) cmdLoadExternal(r *reader) []byte {
 		return errorResponse(RCInsufficient)
 	}
 	o := &object{public: inPublic, name: inPublic.name()}
+	// An externally loaded object has no TPM ancestry: its Qualified Name is its
+	// Name (TPM 2.0 Part 1, §26.5).
+	o.qualifiedName = append([]byte(nil), o.name...)
 	if len(inPrivate) > 0 {
 		sr := newReader(inPrivate)
 		_ = sr.u16() // TPM2B_SENSITIVE outer size
@@ -454,9 +469,13 @@ func (t *TPM) cmdReadPublic(r *reader) []byte {
 	if !ok {
 		return errorResponse(withHandle(RCHandle, 1))
 	}
+	qn := o.qualifiedName
+	if len(qn) == 0 {
+		qn = o.name // pre-QN object (e.g. restored from an older snapshot)
+	}
 	var w writer
 	o.public.marshal2B(&w) // outPublic
 	w.tpm2b(o.name)        // name
-	w.tpm2b(o.name)        // qualifiedName (simplified: equal to Name)
+	w.tpm2b(qn)            // qualifiedName
 	return successResponse(w.bytes(), 0)
 }

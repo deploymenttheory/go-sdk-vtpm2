@@ -101,8 +101,9 @@ func (t *TPM) decryptCommandParams(ac *commandAuth, r *reader) {
 			return
 		}
 		authValue := t.entityAuthValue(ac.handles[0])
+		bound := len(as.bindName) > 0 && hmac.Equal(as.bindName, t.handleName(ac.handles[0]))
 		// Command direction: nonceNewer = nonceCaller, nonceOlder = nonceTPM.
-		cryptParam(as, authValue, s.nonce, as.nonceTPM, r.b[ac.cpStart:], false)
+		cryptParam(as, authValue, s.nonce, as.nonceTPM, r.b[ac.cpStart:], bound, false)
 		ac.cpParams = append([]byte(nil), r.b[ac.cpStart:]...)
 		return // only the first decrypt session applies
 	}
@@ -219,6 +220,7 @@ func (t *TPM) authResponse(ac *commandAuth, respHandles []uint32, rpParams []byt
 	// *plaintext* parameters. Response encryption (below) happens afterwards.
 	var encSess *authSession
 	var encNonce, encOlder, encAuthVal []byte
+	var encBound bool
 	for i, s := range ac.sessions {
 		cont := s.attrs & attrContinue
 		if s.handle == RHPW {
@@ -242,6 +244,7 @@ func (t *TPM) authResponse(ac *commandAuth, respHandles []uint32, rpParams []byt
 		auths[i] = respAuth{nonce: nonce, mac: mac, cont: cont}
 		if s.attrs&attrEncrypt != 0 && encSess == nil {
 			encSess, encNonce, encOlder, encAuthVal = as, nonce, s.nonce, ac.resolved[i].authValue
+			encBound = ac.resolved[i].bound
 		}
 		if cont == 0 {
 			t.sessions.flush(s.handle)
@@ -253,7 +256,7 @@ func (t *TPM) authResponse(ac *commandAuth, respHandles []uint32, rpParams []byt
 	params := rpParams
 	if encSess != nil {
 		params = append([]byte(nil), rpParams...)
-		cryptParam(encSess, encAuthVal, encNonce, encOlder, params, true)
+		cryptParam(encSess, encAuthVal, encNonce, encOlder, params, encBound, true)
 	}
 
 	var body writer

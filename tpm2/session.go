@@ -94,9 +94,10 @@ func deriveSessionKey(authHash uint16, bindAuth, salt, nonceTPM, nonceCaller []b
 	return kdfa(authHash, key, []byte("ATH"), nonceTPM, nonceCaller, hashSize(authHash)*8)
 }
 
-// cmdStartAuthSession implements TPM2_StartAuthSession. Salted sessions (a
-// non-NULL tpmKey) require an asymmetric key to decrypt the salt and are not yet
-// supported; bind may be NULL or a permanent hierarchy handle.
+// cmdStartAuthSession implements TPM2_StartAuthSession. A non-NULL tpmKey makes
+// the session salted: its private half decrypts the caller's salt (RSA-OAEP or
+// ECDH), which is folded into the session key. bind may be NULL or a permanent
+// hierarchy handle.
 func (t *TPM) cmdStartAuthSession(r *reader) []byte {
 	tpmKey := r.u32()
 	bind := r.u32()
@@ -119,10 +120,24 @@ func (t *TPM) cmdStartAuthSession(r *reader) []byte {
 	if len(nonceCaller) < 16 {
 		return errorResponse(withParam(RCSize, 1)) // nonceCaller must be >= 16 bytes
 	}
+	// Salted session: a non-NULL tpmKey is a loaded decryption key whose private
+	// half recovers the caller-supplied salt (TPM 2.0 Part 1, §19.6.7). Windows
+	// salts to the SRK to establish a confidential session for the BitLocker VMK.
+	var salt []byte
 	if tpmKey != RHNull {
-		return errorResponse(withHandle(RCHandle, 1)) // salted sessions: Phase 3
-	}
-	if len(encSalt) != 0 {
+		key, ok := t.objects.get(tpmKey)
+		if !ok {
+			return errorResponse(withHandle(RCHandle, 1)) // tpmKey not loaded
+		}
+		if key.public.Attrs&ObjDecrypt == 0 {
+			return errorResponse(withHandle(RCValue, 1)) // tpmKey must be a decryption key
+		}
+		s, ok := decryptSalt(key, encSalt, t.rand)
+		if !ok {
+			return errorResponse(withParam(RCValue, 2)) // salt did not decrypt
+		}
+		salt = s
+	} else if len(encSalt) != 0 {
 		return errorResponse(withParam(RCValue, 2)) // no salt without a tpmKey
 	}
 
@@ -146,7 +161,7 @@ func (t *TPM) cmdStartAuthSession(r *reader) []byte {
 		authHash:    authHash,
 		nonceTPM:    nonceTPM,
 		nonceCaller: nonceCaller,
-		sessionKey:  deriveSessionKey(authHash, bindAuth, nil, nonceTPM, nonceCaller),
+		sessionKey:  deriveSessionKey(authHash, bindAuth, salt, nonceTPM, nonceCaller),
 		bindName:    bindName,
 		symmetric:   sym,
 	}

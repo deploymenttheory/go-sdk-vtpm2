@@ -162,6 +162,7 @@ const (
 	RCPolicyFail   uint32 = rcFmt1 + 0x01D // TPM_RC_POLICY_FAIL (0x09D)
 	RCIntegrity    uint32 = rcFmt1 + 0x01F // TPM_RC_INTEGRITY (0x09F)
 	RCBadAuth      uint32 = rcFmt1 + 0x022 // TPM_RC_BAD_AUTH (0x0A2)
+	RCTicket       uint32 = rcFmt1 + 0x020 // TPM_RC_TICKET (0x0A0)
 	RCPolicyCC     uint32 = rcFmt1 + 0x024 // TPM_RC_POLICY_CC (0x0A4)
 	RCSignature    uint32 = rcFmt1 + 0x05B // TPM_RC_SIGNATURE (0x0DB)
 	RCKey          uint32 = rcFmt1 + 0x07B // TPM_RC_KEY (0x0FB)
@@ -237,16 +238,29 @@ const (
 	AlgOAEP         uint16 = 0x0017 // TPM_ALG_OAEP
 	AlgECDSA        uint16 = 0x0018 // TPM_ALG_ECDSA
 	AlgECDH         uint16 = 0x0019 // TPM_ALG_ECDH
+	AlgSHA3256      uint16 = 0x0027 // TPM_ALG_SHA3_256
+	AlgSHA3384      uint16 = 0x0028 // TPM_ALG_SHA3_384
+	AlgSHA3512      uint16 = 0x0029 // TPM_ALG_SHA3_512
 	AlgKDF1SP800108 uint16 = 0x0022 // TPM_ALG_KDF1_SP800_108
+	AlgKDF1SP80056A uint16 = 0x0020 // TPM_ALG_KDF1_SP800_56A
+	AlgKDF2         uint16 = 0x0021 // TPM_ALG_KDF2
 	AlgECC          uint16 = 0x0023 // TPM_ALG_ECC
 	AlgSymCipher    uint16 = 0x0025 // TPM_ALG_SYMCIPHER
+	AlgCMAC         uint16 = 0x003F // TPM_ALG_CMAC
+	AlgCTR          uint16 = 0x0040 // TPM_ALG_CTR
+	AlgOFB          uint16 = 0x0041 // TPM_ALG_OFB
+	AlgCBC          uint16 = 0x0042 // TPM_ALG_CBC
 	AlgCFB          uint16 = 0x0043 // TPM_ALG_CFB
+	AlgECB          uint16 = 0x0044 // TPM_ALG_ECB
 )
 
-// ECC curve identifiers (TPM_ECC_CURVE).
+// ECC curve identifiers (TPM_ECC_CURVE). NIST P-256/P-384/P-521 are backed by the
+// Go standard library; the SM2 and Barreto-Naehrig curves the spec also defines
+// are intentionally absent (no pure-Go stdlib support).
 const (
 	ECCNistP256 uint16 = 0x0003 // TPM_ECC_NIST_P256
 	ECCNistP384 uint16 = 0x0004 // TPM_ECC_NIST_P384
+	ECCNistP521 uint16 = 0x0005 // TPM_ECC_NIST_P521
 )
 
 // TPMA_OBJECT attribute bits (object attributes in a TPMT_PUBLIC).
@@ -267,23 +281,29 @@ const (
 // TPMA_NV attribute bits (NV index attributes in a TPMS_NV_PUBLIC). The NT field
 // (bits 4..7) selects the index type (ordinary, counter, bits, extend, pin).
 const (
-	NVPPWrite      uint32 = 1 << 0
-	NVOwnerWrite   uint32 = 1 << 1
-	NVAuthWrite    uint32 = 1 << 2
-	NVPolicyWrite  uint32 = 1 << 3
-	NVNTShift      uint32 = 4
-	NVNTMask       uint32 = 0xF << NVNTShift
-	NVPolicyDelete uint32 = 1 << 10
-	NVWriteLocked  uint32 = 1 << 11
-	NVWriteAll     uint32 = 1 << 12
-	NVWriteDefine  uint32 = 1 << 13
-	NVGlobalLock   uint32 = 1 << 14
-	NVPPRead       uint32 = 1 << 16
-	NVOwnerRead    uint32 = 1 << 17
-	NVAuthRead     uint32 = 1 << 18
-	NVPolicyRead   uint32 = 1 << 19
-	NVReadLocked   uint32 = 1 << 24
-	NVWritten      uint32 = 1 << 29
+	NVPPWrite        uint32 = 1 << 0
+	NVOwnerWrite     uint32 = 1 << 1
+	NVAuthWrite      uint32 = 1 << 2
+	NVPolicyWrite    uint32 = 1 << 3
+	NVNTShift        uint32 = 4
+	NVNTMask         uint32 = 0xF << NVNTShift
+	NVPolicyDelete   uint32 = 1 << 10
+	NVWriteLocked    uint32 = 1 << 11
+	NVWriteAll       uint32 = 1 << 12
+	NVWriteDefine    uint32 = 1 << 13
+	NVWriteSTClear   uint32 = 1 << 14
+	NVGlobalLock     uint32 = 1 << 15
+	NVPPRead         uint32 = 1 << 16
+	NVOwnerRead      uint32 = 1 << 17
+	NVAuthRead       uint32 = 1 << 18
+	NVPolicyRead     uint32 = 1 << 19
+	NVNoDA           uint32 = 1 << 25
+	NVOrderly        uint32 = 1 << 26
+	NVClearSTClear   uint32 = 1 << 27
+	NVReadLocked     uint32 = 1 << 28
+	NVWritten        uint32 = 1 << 29
+	NVPlatformCreate uint32 = 1 << 30
+	NVReadSTClear    uint32 = 1 << 31
 )
 
 // Capability identifiers (TPM_CAP). The defined selectors form a contiguous

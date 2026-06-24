@@ -9,12 +9,15 @@ package tpm2
 
 const maxTransientObjects = 64
 
-// object is a loaded TPM object: its public area, its sensitive area, and the
-// cached Name (nameAlg ‖ H(public)).
+// object is a loaded TPM object: its public area, its sensitive area, the cached
+// Name (nameAlg ‖ H(public)), and the Qualified Name — the chained hash
+// H_nameAlg(parentQN ‖ Name) that binds the object to its full ancestry
+// (TPM 2.0 Part 1, §26.5).
 type object struct {
-	public    public
-	sensitive sensitive
-	name      []byte
+	public        public
+	sensitive     sensitive
+	name          []byte
+	qualifiedName []byte
 }
 
 // objectTable holds loaded transient and persistent objects.

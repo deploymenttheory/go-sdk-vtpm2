@@ -14,7 +14,8 @@ import "fmt"
 //	v4: + persistent objects (EK/SRK).
 //	v5: + NV indices.
 //	v6: + clock/reset/restart counters.
-const snapshotVersion = 6
+//	v7: + persistent-object Qualified Names.
+const snapshotVersion = 7
 
 // Snapshot is a serializable copy of a TPM's persistent state. It is the
 // boundary between the command processor and the state package, which persists
@@ -58,9 +59,10 @@ type NVIndexSnap struct {
 // ObjectSnap is a serialized persistent object: its handle plus the marshalled
 // public and sensitive areas.
 type ObjectSnap struct {
-	Handle    uint32 `json:"handle"`
-	Public    []byte `json:"public"`
-	Sensitive []byte `json:"sensitive"`
+	Handle        uint32 `json:"handle"`
+	Public        []byte `json:"public"`
+	Sensitive     []byte `json:"sensitive"`
+	QualifiedName []byte `json:"qualifiedName,omitempty"` // v7+
 }
 
 // DASnap is the serialized dictionary-attack lockout state.
@@ -181,7 +183,7 @@ func snapPersistentObjects(ot *objectTable) []ObjectSnap {
 		var pub, sens writer
 		o.public.marshal(&pub)
 		o.sensitive.marshal(&sens)
-		out = append(out, ObjectSnap{Handle: h, Public: pub.bytes(), Sensitive: sens.bytes()})
+		out = append(out, ObjectSnap{Handle: h, Public: pub.bytes(), Sensitive: sens.bytes(), QualifiedName: o.qualifiedName})
 	}
 	return out
 }
@@ -247,6 +249,12 @@ func (t *TPM) Restore(s Snapshot) error {
 			return fmt.Errorf("tpm2: corrupt persistent object 0x%x", os.Handle)
 		}
 		o.name = o.public.name()
+		// v7+ carries the Qualified Name; older snapshots fall back to the Name.
+		if len(os.QualifiedName) > 0 {
+			o.qualifiedName = append([]byte(nil), os.QualifiedName...)
+		} else {
+			o.qualifiedName = append([]byte(nil), o.name...)
+		}
 		t.objects.persistent[os.Handle] = &o
 	}
 

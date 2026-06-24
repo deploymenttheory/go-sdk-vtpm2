@@ -4,7 +4,9 @@
 package tpm2
 
 import (
+	"bytes"
 	"crypto/ecdsa"
+	"crypto/hmac"
 	"crypto/rsa"
 	"math/big"
 )
@@ -43,7 +45,7 @@ func (t *TPM) signWith(o *object, sigAlg, hashAlg uint16, digest []byte) ([]byte
 		if curve == nil {
 			return nil, errorResponse(RCValue)
 		}
-		priv := eccPrivateKey(curve, o.sensitive.Secret)
+		priv := eccPrivateKey(curve, o.public.Curve, o.sensitive.Secret)
 		rr, ss, err := ecdsa.Sign(t.rand, priv, digest)
 		if err != nil {
 			return nil, errorResponse(RCValue)
@@ -71,9 +73,9 @@ func (t *TPM) cmdSign(tag uint16, r *reader) []byte {
 	if scheme != AlgNull {
 		schemeHash = r.u16()
 	}
-	_ = r.u16() // validation (TPMT_TK_HASHCHECK): tag
-	_ = r.u32() // hierarchy
-	_ = r.tpm2b()
+	_ = r.u16()           // validation (TPMT_TK_HASHCHECK): tag
+	tkHier := r.u32()     // ticket hierarchy
+	tkDigest := r.tpm2b() // ticket digest
 	if r.err != nil {
 		return errorResponse(RCInsufficient)
 	}
@@ -83,6 +85,15 @@ func (t *TPM) cmdSign(tag uint16, r *reader) []byte {
 	}
 	if key.public.Attrs&ObjSign == 0 {
 		return errorResponse(withHandle(RCAttributes, 1)) // not a signing key
+	}
+	// A restricted signing key may only sign a digest the TPM itself produced,
+	// proven by a valid TPMT_TK_HASHCHECK over that digest (TPM 2.0 Part 3, §20.1).
+	if key.public.Attrs&ObjRestricted != 0 {
+		proof := t.hierarchyProof(tkHier)
+		want := hmacSum(AlgSHA256, proof, be16(STHashCheck), digest)
+		if tkHier == RHNull || proof == nil || !hmac.Equal(tkDigest, want) {
+			return errorResponse(RCTicket)
+		}
 	}
 	if errResp := t.authorizeObject(ac, 0, key); errResp != nil {
 		return errResp
@@ -145,11 +156,12 @@ func (t *TPM) cmdVerifySignature(r *reader) []byte {
 	if !valid {
 		return errorResponse(RCSignature)
 	}
-	// TPMT_TK_VERIFIED.
+	// TPMT_TK_VERIFIED, keyed by the NULL-hierarchy proof (the verification key is
+	// not in a persistent hierarchy here). HMAC(proof, TPM_ST_VERIFIED ‖ digest).
 	var w writer
 	w.u16(STVerified)
 	w.u32(RHNull)
-	w.tpm2b(hmacSum(AlgSHA256, t.contextKey, be16(STVerified), digest))
+	w.tpm2b(hmacSum(AlgSHA256, t.hierarchyProof(RHNull), be16(STVerified), digest))
 	return successResponse(w.bytes(), 0)
 }
 
@@ -157,18 +169,31 @@ func (t *TPM) cmdVerifySignature(r *reader) []byte {
 func (t *TPM) cmdHash(r *reader) []byte {
 	data := r.tpm2b()
 	hashAlg := r.u16()
-	_ = r.u32() // hierarchy
+	tkHierarchy := r.u32() // hierarchy for the validation ticket
 	if r.err != nil {
 		return errorResponse(RCInsufficient)
 	}
 	if _, ok := cryptoHash(hashAlg); !ok {
 		return errorResponse(withParam(RCValue, 2))
 	}
+	digest := hashSum(hashAlg, data)
 	var w writer
-	w.tpm2b(hashSum(hashAlg, data)) // outHash
-	w.u16(STHashCheck)              // validation (TPMT_TK_HASHCHECK)
-	w.u32(RHNull)
-	w.tpm2b(nil)
+	w.tpm2b(digest) // outHash
+	// TPMT_TK_HASHCHECK (TPM 2.0 Part 3, §15.4): a valid ticket only when a real
+	// hierarchy is requested AND the data is "safe to sign" — i.e. it does not begin
+	// with TPM_GENERATED_VALUE, which would let a caller forge a TPM-produced
+	// structure. Otherwise a NULL ticket (hierarchy NULL, empty digest).
+	safe := !bytes.HasPrefix(data, be32(tpmGeneratedValue))
+	proof := t.hierarchyProof(tkHierarchy)
+	if tkHierarchy != RHNull && safe && proof != nil {
+		w.u16(STHashCheck)
+		w.u32(tkHierarchy)
+		w.tpm2b(hmacSum(AlgSHA256, proof, be16(STHashCheck), digest))
+	} else {
+		w.u16(STHashCheck)
+		w.u32(RHNull)
+		w.tpm2b(nil)
+	}
 	return successResponse(w.bytes(), 0)
 }
 

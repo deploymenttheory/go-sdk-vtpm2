@@ -79,6 +79,24 @@ func (h *hierarchies) byHandle(handle uint32) *hierarchy {
 	return nil
 }
 
+// proofFromSeed derives a hierarchy's proof value from its primary seed, KDFa with
+// the "PROOF" label (TPM 2.0 Part 1, §22.4). Tickets are HMACed with this proof.
+func proofFromSeed(seed []byte) []byte {
+	return kdfa(AlgSHA256, seed, []byte("PROOF"), nil, nil, 256)
+}
+
+// hierarchyProof returns the proof value for a hierarchy handle, used to key the
+// tickets it issues. It is stable while the seed is unchanged, so a ticket stays
+// valid across reboots for a persistent hierarchy; the NULL hierarchy's seed (and
+// thus proof) is regenerated each reset, matching the spec's ephemeral null proof.
+func (t *TPM) hierarchyProof(handle uint32) []byte {
+	hi := t.h.byHandle(handle)
+	if hi == nil {
+		return nil
+	}
+	return proofFromSeed(hi.seed)
+}
+
 // clear models TPM2_Clear: a new storage primary seed and the owner, endorsement
 // and lockout auth/policy reset to empty; the storage and endorsement hierarchies
 // are re-enabled. The platform hierarchy, the EPS and the PPS are untouched, so
