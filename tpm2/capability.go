@@ -87,14 +87,18 @@ var commandTable = []struct {
 	{CCStartup, 0},
 	{CCShutdown, 0},
 	{CCStirRandom, 0},
-	{CCPolicyNV, 3}, // 0x149 (authHandle, nvIndex, policySession)
+	{CCActivateCredential, 2}, // 0x147 (activateHandle, keyHandle)
+	{CCPolicyNV, 3},           // 0x149 (authHandle, nvIndex, policySession)
+	{CCDuplicate, 2},          // 0x14B (objectHandle, newParentHandle)
 	{CCNVRead, 2},
 	{CCNVReadLock, 2},
 	{CCObjectChangeAuth, 2}, // objectHandle, parentHandle
 	{CCPolicySecret, 2},     // 0x151 (authHandle, policySession)
+	{CCRewrap, 2},           // 0x152 (oldParent, newParent)
 	{CCCreate, 1},
 	{CCECDHZGen, 1}, // 0x154
 	{CCHMAC, 1},     // 0x155 (= TPM2_MAC)
+	{CCImport, 1},   // 0x156
 	{CCLoad, 1},
 	{CCQuote, 1},
 	{CCRSADecrypt, 1},     // 0x159
@@ -108,6 +112,7 @@ var commandTable = []struct {
 	{CCECDHKeyGen, 1},   // 0x163
 	{CCFlushContext, 0}, // flushHandle is a parameter, not a command handle
 	{CCLoadExternal, 0},
+	{CCMakeCredential, 1}, // 0x168
 	{CCNVReadPublic, 1},
 	{CCPolicyAuthorize, 1}, // 0x16A
 	{CCPolicyAuthValue, 1},

@@ -371,6 +371,13 @@ func rsaPrivateKey(modulus, prime []byte, exp uint32) *rsa.PrivateKey {
 // ephemeral public point and the salt is KDFe over the one-pass ECDH secret with
 // the label "SECRET". The salt length is the key's name-algorithm digest size.
 func decryptSalt(o *object, encryptedSecret []byte, rng io.Reader) ([]byte, bool) {
+	return decryptSeed(o, encryptedSecret, []byte("SECRET"), rng)
+}
+
+// decryptSeed recovers a Labeled-KEM secret (the shared seed) encrypted to o's
+// public key under the given label — "SECRET" for session salts, "IDENTITY" for
+// credentials, "DUPLICATE" for duplication (TPM 2.0 Part 1, §8.4.5 / §24).
+func decryptSeed(o *object, encryptedSecret, label []byte, rng io.Reader) ([]byte, bool) {
 	switch o.public.Type {
 	case AlgRSA:
 		h := newHash(o.public.NameAlg)
@@ -378,12 +385,11 @@ func decryptSalt(o *object, encryptedSecret []byte, rng io.Reader) ([]byte, bool
 			return nil, false
 		}
 		priv := rsaPrivateKey(o.public.Unique, o.sensitive.Secret, o.public.Exp)
-		// The TPM OAEP label is the null-terminated string "SECRET".
-		salt, err := rsa.DecryptOAEP(h, rng, priv, encryptedSecret, append([]byte("SECRET"), 0))
+		seed, err := rsa.DecryptOAEP(h, rng, priv, encryptedSecret, oaepLabel(label))
 		if err != nil {
 			return nil, false
 		}
-		return salt, true
+		return seed, true
 	case AlgECC:
 		c := ecdhCurveFor(o.public.Curve)
 		ec := curveFor(o.public.Curve)
@@ -412,12 +418,60 @@ func decryptSalt(o *object, encryptedSecret []byte, rng io.Reader) ([]byte, bool
 		if err != nil {
 			return nil, false
 		}
-		// salt = KDFe(nameAlg, Z.x, "SECRET", Q_ephemeral.x, Q_static.x, digestBits).
-		salt := kdfe(o.public.NameAlg, z, []byte("SECRET"),
+		// seed = KDFe(nameAlg, Z.x, label, Q_ephemeral.x, Q_static.x, digestBits).
+		seed := kdfe(o.public.NameAlg, z, label,
 			padLeft(qeX, n), padLeft(o.public.UniqueX, n), hashSize(o.public.NameAlg)*8)
-		return salt, true
+		return seed, true
 	}
 	return nil, false
+}
+
+// encryptSeed produces a Labeled-KEM secret for o's public key under label and
+// returns the shared seed together with the wire ciphertext (TPM2B_ENCRYPTED_SECRET
+// content). It is the inverse of decryptSeed, used by TPM2_MakeCredential.
+func encryptSeed(o *object, label []byte, rng io.Reader) (seed, secret []byte, ok bool) {
+	switch o.public.Type {
+	case AlgRSA:
+		h := newHash(o.public.NameAlg)
+		if h == nil {
+			return nil, nil, false
+		}
+		seed = randBytes(rng, hashSize(o.public.NameAlg))
+		pub := &rsa.PublicKey{N: new(big.Int).SetBytes(o.public.Unique), E: rsaExp(o.public.Exp)}
+		enc, err := rsa.EncryptOAEP(h, rng, pub, seed, oaepLabel(label))
+		if err != nil {
+			return nil, nil, false
+		}
+		return seed, enc, true
+	case AlgECC:
+		c := ecdhCurveFor(o.public.Curve)
+		ec := curveFor(o.public.Curve)
+		if c == nil || ec == nil {
+			return nil, nil, false
+		}
+		n := (ec.Params().BitSize + 7) / 8
+		eph, err := c.GenerateKey(rng) // ephemeral key Qe
+		if err != nil {
+			return nil, nil, false
+		}
+		staterBytes := append(append([]byte{0x04}, padLeft(o.public.UniqueX, n)...), padLeft(o.public.UniqueY, n)...)
+		statKey, err := c.NewPublicKey(staterBytes)
+		if err != nil {
+			return nil, nil, false
+		}
+		z, err := eph.ECDH(statKey) // Z.x = ephemeral·Q_static
+		if err != nil {
+			return nil, nil, false
+		}
+		qe := eph.PublicKey().Bytes() // 0x04 ‖ X ‖ Y
+		qeX, qeY := qe[1:1+n], qe[1+n:]
+		seed = kdfe(o.public.NameAlg, z, label, qeX, padLeft(o.public.UniqueX, n), hashSize(o.public.NameAlg)*8)
+		var ws writer // TPMS_ECC_POINT(Qe)
+		ws.tpm2b(qeX)
+		ws.tpm2b(qeY)
+		return seed, ws.bytes(), true
+	}
+	return nil, nil, false
 }
 
 // eccPrivateKey reconstructs an ECDSA private key from a TPM object's scalar. The

@@ -83,29 +83,11 @@ func cryptParam(as *authSession, authValue, nonceNewer, nonceOlder, params []byt
 // object Name. The private blob is integrityOuter ‖ symIv ‖ encSensitive, size-
 // prefixed as a TPM2B_PRIVATE.
 func wrapSensitive(parent *object, child *sensitive, childName []byte, rng io.Reader) []byte {
-	nameAlg := parent.public.NameAlg
-	symSeed := parent.sensitive.SeedValue
-
 	var sw writer
 	child.marshal2B(&sw) // TPM2B_SENSITIVE
-
-	symIv := randBytes(rng, aes.BlockSize) // symIv := bits from the RNG (eq. before 34)
-	symKey := kdfa(nameAlg, symSeed, []byte("STORAGE"), childName, nil, int(parent.public.Sym.KeyBits))
-	enc := aesCFB(symKey, symIv, sw.bytes(), true) // encSensitive (eq. 34)
-
-	// outerHMAC := HMAC(HMACkey, symIv ‖ encSensitive ‖ name), symIv a TPM2B_IV (eq. 36).
-	var ivb writer
-	ivb.tpm2b(symIv)
-	integrityKey := kdfa(nameAlg, symSeed, []byte("INTEGRITY"), nil, nil, hashSize(nameAlg)*8)
-	integrity := hmacSum(nameAlg, integrityKey, ivb.bytes(), enc, childName)
-
-	var inner writer
-	inner.tpm2b(integrity) // outer integrity (TPM2B_DIGEST)
-	inner.tpm2b(symIv)     // symmetric IV (TPM2B_IV)
-	inner.raw(enc)         // encrypted sensitive
-
+	inner := wrapWithSeed(parent.public.NameAlg, parent.sensitive.SeedValue, sw.bytes(), childName, parent.public.Sym.KeyBits, rng)
 	var out writer
-	out.tpm2b(inner.bytes()) // TPM2B_PRIVATE
+	out.tpm2b(inner) // TPM2B_PRIVATE
 	return out.bytes()
 }
 
@@ -113,27 +95,10 @@ func wrapSensitive(parent *object, child *sensitive, childName []byte, rng io.Re
 // ciphertext and childName), then decrypts and unmarshals the TPMT_SENSITIVE.
 // privateContent is the inner bytes of TPM2B_PRIVATE (after the size prefix).
 func unwrapPrivate(parent *object, privateContent, childName []byte) (*sensitive, bool) {
-	nameAlg := parent.public.NameAlg
-	symSeed := parent.sensitive.SeedValue
-
-	r := newReader(privateContent)
-	integrity := r.tpm2b()
-	symIv := r.tpm2b()
-	enc := r.bytes(r.remaining())
-	if r.err != nil {
+	dec, ok := unwrapWithSeed(parent.public.NameAlg, parent.sensitive.SeedValue, privateContent, childName, parent.public.Sym.KeyBits)
+	if !ok {
 		return nil, false
 	}
-
-	var ivb writer
-	ivb.tpm2b(symIv)
-	integrityKey := kdfa(nameAlg, symSeed, []byte("INTEGRITY"), nil, nil, hashSize(nameAlg)*8)
-	if !hmac.Equal(hmacSum(nameAlg, integrityKey, ivb.bytes(), enc, childName), integrity) {
-		return nil, false
-	}
-
-	symKey := kdfa(nameAlg, symSeed, []byte("STORAGE"), childName, nil, int(parent.public.Sym.KeyBits))
-	dec := aesCFB(symKey, symIv, enc, false)
-
 	sr := newReader(dec)
 	_ = sr.u16() // TPM2B_SENSITIVE outer size
 	var sens sensitive
@@ -142,4 +107,47 @@ func unwrapPrivate(parent *object, privateContent, childName []byte) (*sensitive
 		return nil, false
 	}
 	return &sens, true
+}
+
+// wrapWithSeed produces the outer-wrap TPM2B_PRIVATE content (integrity ‖ symIv ‖
+// encSensitive) for a marshalled sensitive area bound to name, keyed from a seed
+// (TPM 2.0 Part 1, §23.3): symKey = KDFa(seed,"STORAGE",name), a random symIv, and
+// outerHMAC = HMAC(KDFa(seed,"INTEGRITY"), symIv ‖ encSensitive ‖ name). The seed
+// is the parent's symmetric seed for object storage, or an asymmetrically-shared
+// seed for duplication.
+func wrapWithSeed(nameAlg uint16, seed, sensitive2B, name []byte, keyBits uint16, rng io.Reader) []byte {
+	symIv := randBytes(rng, aes.BlockSize)
+	symKey := kdfa(nameAlg, seed, []byte("STORAGE"), name, nil, int(keyBits))
+	enc := aesCFB(symKey, symIv, sensitive2B, true)
+
+	var ivb writer
+	ivb.tpm2b(symIv)
+	integrityKey := kdfa(nameAlg, seed, []byte("INTEGRITY"), nil, nil, hashSize(nameAlg)*8)
+	integrity := hmacSum(nameAlg, integrityKey, ivb.bytes(), enc, name)
+
+	var inner writer
+	inner.tpm2b(integrity)
+	inner.tpm2b(symIv)
+	inner.raw(enc)
+	return inner.bytes()
+}
+
+// unwrapWithSeed reverses wrapWithSeed, returning the marshalled TPM2B_SENSITIVE
+// bytes (still to be unmarshalled by the caller).
+func unwrapWithSeed(nameAlg uint16, seed, blob, name []byte, keyBits uint16) ([]byte, bool) {
+	r := newReader(blob)
+	integrity := r.tpm2b()
+	symIv := r.tpm2b()
+	enc := r.bytes(r.remaining())
+	if r.err != nil {
+		return nil, false
+	}
+	var ivb writer
+	ivb.tpm2b(symIv)
+	integrityKey := kdfa(nameAlg, seed, []byte("INTEGRITY"), nil, nil, hashSize(nameAlg)*8)
+	if !hmac.Equal(hmacSum(nameAlg, integrityKey, ivb.bytes(), enc, name), integrity) {
+		return nil, false
+	}
+	symKey := kdfa(nameAlg, seed, []byte("STORAGE"), name, nil, int(keyBits))
+	return aesCFB(symKey, symIv, enc, false), true
 }

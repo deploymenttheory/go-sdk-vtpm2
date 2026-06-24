@@ -126,6 +126,14 @@ const (
 	// TPM2_Duplicate (Phase 4) — referenced now by PolicyDuplicationSelect's
 	// implicit command-code restriction.
 	CCDuplicate uint32 = 0x0000014B // TPM2_Duplicate
+
+	// Credentials (Phase 4).
+	CCMakeCredential     uint32 = 0x00000168 // TPM2_MakeCredential
+	CCActivateCredential uint32 = 0x00000147 // TPM2_ActivateCredential
+
+	// Duplication / migration (Phase 4b).
+	CCImport uint32 = 0x00000156 // TPM2_Import
+	CCRewrap uint32 = 0x00000152 // TPM2_Rewrap
 )
 
 // TPM_GENERATED_VALUE prefixes a TPM-produced attestation structure.

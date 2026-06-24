@@ -253,6 +253,16 @@ func (t *TPM) Execute(cmd []byte) []byte {
 		return t.cmdPolicyCapability(r)
 	case CCPolicyParameters:
 		return t.cmdPolicyParameters(r)
+	case CCMakeCredential:
+		return t.cmdMakeCredential(r)
+	case CCActivateCredential:
+		return t.cmdActivateCredential(tag, r)
+	case CCDuplicate:
+		return t.cmdDuplicate(tag, r)
+	case CCImport:
+		return t.cmdImport(tag, r)
+	case CCRewrap:
+		return t.cmdRewrap(tag, r)
 	default:
 		return errorResponse(RCCommandCode)
 	}
