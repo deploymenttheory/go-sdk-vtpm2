@@ -63,17 +63,24 @@ var commandTable = []struct {
 	cc       uint32
 	cHandles uint32
 }{
-	{CCEvictControl, 2}, // auth hierarchy, objectHandle
+	{CCNVUndefineSpaceSpecial, 2}, // 0x11F (nvIndex, platform)
+	{CCEvictControl, 2},           // auth hierarchy, objectHandle
 	{CCHierarchyControl, 1},
 	{CCNVUndefineSpace, 2}, // authHandle, nvIndex
 	{CCChangeEPS, 1},
 	{CCChangePPS, 1},
 	{CCClear, 1},
 	{CCClearControl, 1},
+	{CCClockSet, 1}, // 0x128
 	{CCHierarchyChangeAuth, 1},
 	{CCNVDefineSpace, 1},
+	{CCPCRAllocate, 1},      // 0x12B
+	{CCPCRSetAuthPolicy, 1}, // 0x12C
 	{CCSetPrimaryPolicy, 1},
+	{CCClockRateAdjust, 1}, // 0x130
 	{CCCreatePrimary, 1},
+	{CCNVGlobalWriteLock, 1},     // 0x132
+	{CCGetCommandAuditDigest, 2}, // 0x133 (privacyHandle, signHandle)
 	{CCNVIncrement, 2},
 	{CCNVSetBits, 2},
 	{CCNVExtend, 2},
@@ -81,15 +88,22 @@ var commandTable = []struct {
 	{CCNVWriteLock, 2},
 	{CCDictionaryAttackLockReset, 1},
 	{CCDictionaryAttackParameters, 1},
+	{CCNVChangeAuth, 1}, // 0x13B
+	{CCPCREvent, 1},     // 0x13C
 	{CCPCRReset, 1},
-	{CCSequenceComplete, 1}, // 0x13E
+	{CCSequenceComplete, 1},          // 0x13E
+	{CCSetCommandCodeAuditStatus, 1}, // 0x140
 	{CCSelfTest, 0},
 	{CCStartup, 0},
 	{CCShutdown, 0},
 	{CCStirRandom, 0},
-	{CCActivateCredential, 2}, // 0x147 (activateHandle, keyHandle)
-	{CCPolicyNV, 3},           // 0x149 (authHandle, nvIndex, policySession)
-	{CCDuplicate, 2},          // 0x14B (objectHandle, newParentHandle)
+	{CCActivateCredential, 2},    // 0x147 (activateHandle, keyHandle)
+	{CCCertify, 2},               // 0x148 (objectHandle, signHandle)
+	{CCPolicyNV, 3},              // 0x149 (authHandle, nvIndex, policySession)
+	{CCCertifyCreation, 2},       // 0x14A (signHandle, objectHandle)
+	{CCDuplicate, 2},             // 0x14B (objectHandle, newParentHandle)
+	{CCGetTime, 2},               // 0x14C (privacyAdmin, signHandle)
+	{CCGetSessionAuditDigest, 3}, // 0x14D (privacyAdmin, signHandle, sessionHandle)
 	{CCNVRead, 2},
 	{CCNVReadLock, 2},
 	{CCObjectChangeAuth, 2}, // objectHandle, parentHandle
@@ -137,6 +151,8 @@ var commandTable = []struct {
 	{CCPolicyRestart, 1},
 	{CCReadClock, 0},
 	{CCPCRExtend, 1},
+	{CCPCRSetAuthValue, 1},         // 0x183
+	{CCNVCertify, 3},               // 0x184 (signHandle, authHandle, nvIndex)
 	{CCEventSequenceComplete, 2},   // 0x185 (pcrHandle, sequenceHandle)
 	{CCHashSequenceStart, 0},       // 0x186 (no handle)
 	{CCPolicyPhysicalPresence, 1},  // 0x187
@@ -146,6 +162,7 @@ var commandTable = []struct {
 	{CCPolicyNvWritten, 1},   // 0x18F
 	{CCPolicyTemplate, 1},    // 0x190
 	{CCPolicyAuthorizeNV, 3}, // 0x192 (authHandle, nvIndex, policySession)
+	{CCCertifyX509, 2},       // 0x197 (objectHandle, signHandle)
 	{CCPolicyCapability, 1},  // 0x19B
 	{CCPolicyParameters, 1},  // 0x19C
 }

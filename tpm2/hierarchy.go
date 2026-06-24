@@ -113,12 +113,18 @@ func (h *hierarchies) clear() {
 // by authHandle. Owner and endorsement authorizations are DA-protected; platform
 // is not, and lockout is left reachable so DictionaryAttackLockReset can recover.
 func (t *TPM) authorizeHierarchy(ac *commandAuth, authHandle uint32) []byte {
+	return t.authorizeHierarchyAt(ac, 0, authHandle)
+}
+
+// authorizeHierarchyAt verifies the auth session at sessionIdx against a hierarchy
+// (for commands where the hierarchy is not the first authorized handle).
+func (t *TPM) authorizeHierarchyAt(ac *commandAuth, sessionIdx int, authHandle uint32) []byte {
 	hi := t.h.byHandle(authHandle)
 	if hi == nil {
 		return errorResponse(withHandle(RCHierarchy, 1))
 	}
 	daProtected := authHandle == RHOwner || authHandle == RHEndorsement
-	return t.verifyAuth(ac, 0, permanentName(authHandle), hi.authValue, hi.authPolicy, daProtected)
+	return t.verifyAuth(ac, sessionIdx, permanentName(authHandle), hi.authValue, hi.authPolicy, daProtected)
 }
 
 // cmdClear implements TPM2_Clear: regenerate the storage seed and reset the owner,

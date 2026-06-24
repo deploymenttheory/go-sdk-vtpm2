@@ -32,6 +32,8 @@ type authSession struct {
 	policyCpHash   []byte // PolicyCpHash restriction (nil ⇒ unset)
 	hasLocality    bool   // PolicyLocality was invoked
 	policyLocality byte   // PolicyLocality bitmap (localities 0..4)
+
+	auditDigest []byte // running session-audit digest (nil until first audited command)
 }
 
 // sessionTable holds the live sessions, keyed by handle (in the 0x02xxxxxx range).

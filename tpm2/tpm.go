@@ -30,6 +30,12 @@ type TPM struct {
 	clock     *clockState
 	locality  byte // locality of the current command (set via the transport)
 	rand      io.Reader
+
+	// Audit subsystem (TPM 2.0 Part 1, §19). audit holds the command-audit digest
+	// and the set of audited command codes; exclusiveAudit is the handle of the
+	// session that currently holds exclusive audit status (0 if none).
+	audit          auditState
+	exclusiveAudit uint32
 	// contextKey protects saved contexts (TPM2_ContextSave); it is volatile and
 	// regenerated on reset, so saved contexts do not survive a reboot.
 	contextKey []byte
@@ -53,6 +59,7 @@ func New() *TPM {
 		clock:      newClockState(),
 		rand:       rand.Reader,
 		contextKey: randomSeed(),
+		audit:      auditState{hashAlg: AlgSHA256},
 	}
 }
 
@@ -263,6 +270,40 @@ func (t *TPM) Execute(cmd []byte) []byte {
 		return t.cmdImport(tag, r)
 	case CCRewrap:
 		return t.cmdRewrap(tag, r)
+	case CCCertify:
+		return t.cmdCertify(tag, r)
+	case CCCertifyCreation:
+		return t.cmdCertifyCreation(tag, r)
+	case CCGetTime:
+		return t.cmdGetTime(tag, r)
+	case CCNVCertify:
+		return t.cmdNVCertify(tag, r)
+	case CCSetCommandCodeAuditStatus:
+		return t.cmdSetCommandCodeAuditStatus(tag, r)
+	case CCGetSessionAuditDigest:
+		return t.cmdGetSessionAuditDigest(tag, r)
+	case CCGetCommandAuditDigest:
+		return t.cmdGetCommandAuditDigest(tag, r)
+	case CCCertifyX509:
+		return t.cmdCertifyX509(tag, r)
+	case CCClockSet:
+		return t.cmdClockSet(tag, r)
+	case CCClockRateAdjust:
+		return t.cmdClockRateAdjust(tag, r)
+	case CCPCREvent:
+		return t.cmdPCREvent(tag, r)
+	case CCNVChangeAuth:
+		return t.cmdNVChangeAuth(tag, r)
+	case CCNVGlobalWriteLock:
+		return t.cmdNVGlobalWriteLock(tag, r)
+	case CCPCRAllocate:
+		return t.cmdPCRAllocate(tag, r)
+	case CCPCRSetAuthValue:
+		return t.cmdPCRSetAuthValue(tag, r)
+	case CCPCRSetAuthPolicy:
+		return t.cmdPCRSetAuthPolicy(tag, r)
+	case CCNVUndefineSpaceSpecial:
+		return t.cmdNVUndefineSpaceSpecial(tag, r)
 	default:
 		return errorResponse(RCCommandCode)
 	}
@@ -284,6 +325,10 @@ func (t *TPM) Init(deleteVolatile bool) {
 	t.objects.resetTransient()     // transient objects are volatile; persistent ones remain
 	t.sequences.reset()            // hash/HMAC sequences are volatile
 	t.contextKey = randomSeed()    // invalidate any previously saved contexts
+	t.exclusiveAudit = 0           // exclusive audit status is tied to volatile sessions
+	if t.audit.hashAlg == AlgNull {
+		t.audit.hashAlg = AlgSHA256 // default command-audit algorithm
+	}
 	if deleteVolatile {
 		t.pcr.reset()
 	}

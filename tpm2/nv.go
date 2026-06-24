@@ -137,6 +137,12 @@ func (t *TPM) cmdNVUndefineSpace(tag uint16, r *reader) []byte {
 // TPMA_NV attributes permit the chosen auth handle (the index itself, Owner, or
 // Platform) for the requested direction.
 func (t *TPM) authorizeNV(ac *commandAuth, idx *nvIndex, authHandle uint32, write bool) []byte {
+	return t.authorizeNVAt(ac, 0, idx, authHandle, write)
+}
+
+// authorizeNVAt verifies the auth session at sessionIdx against an NV Index's
+// access policy (for commands where the NV auth is not the first session).
+func (t *TPM) authorizeNVAt(ac *commandAuth, sessionIdx int, idx *nvIndex, authHandle uint32, write bool) []byte {
 	attrs := idx.public.Attrs
 	indexAuth, policyAuth, ownerAuth, ppAuth := NVAuthRead, NVPolicyRead, NVOwnerRead, NVPPRead
 	if write {
@@ -147,17 +153,17 @@ func (t *TPM) authorizeNV(ac *commandAuth, idx *nvIndex, authHandle uint32, writ
 		if attrs&indexAuth == 0 && attrs&policyAuth == 0 {
 			return errorResponse(RCNVAuthorization)
 		}
-		return t.verifyAuth(ac, 0, idx.name, idx.authValue, idx.public.AuthPolicy, false)
+		return t.verifyAuth(ac, sessionIdx, idx.name, idx.authValue, idx.public.AuthPolicy, false)
 	case RHOwner:
 		if attrs&ownerAuth == 0 {
 			return errorResponse(RCNVAuthorization)
 		}
-		return t.authorizeHierarchy(ac, RHOwner)
+		return t.authorizeHierarchyAt(ac, sessionIdx, RHOwner)
 	case RHPlatform:
 		if attrs&ppAuth == 0 {
 			return errorResponse(RCNVAuthorization)
 		}
-		return t.authorizeHierarchy(ac, RHPlatform)
+		return t.authorizeHierarchyAt(ac, sessionIdx, RHPlatform)
 	}
 	return errorResponse(withHandle(RCValue, 1))
 }

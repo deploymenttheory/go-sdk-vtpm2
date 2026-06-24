@@ -306,7 +306,7 @@ func TestGetCapabilityAlgs(t *testing.T) {
 func TestGetCapabilityCommands(t *testing.T) {
 	tpm := New()
 	startup(t, tpm)
-	r := newReader(getCap(t, tpm, CapCommands, 0, 100))
+	r := newReader(getCap(t, tpm, CapCommands, 0, 256))
 	_ = r.u8() // moreData
 	if c := r.u32(); c != CapCommands {
 		t.Fatalf("capability echo = 0x%x, want CapCommands", c)

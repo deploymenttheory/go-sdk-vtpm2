@@ -29,6 +29,13 @@ type pcrState struct {
 	// hashSize(alg)-byte slice, zero-initialized as required after TPM_SU_CLEAR.
 	banks         map[uint16][][]byte
 	updateCounter uint32
+	// allocated is the set of bank algorithms a reset rebuilds (TPM2_PCR_Allocate
+	// changes it). nil ⇒ the default supportedPCRBanks.
+	allocated []uint16
+	// authValues / authPolicies hold any per-PCR authorization set by
+	// TPM2_PCR_SetAuthValue / TPM2_PCR_SetAuthPolicy.
+	authValues   map[uint32][]byte
+	authPolicies map[uint32][]byte
 }
 
 func newPCRState() *pcrState {
@@ -40,7 +47,12 @@ func newPCRState() *pcrState {
 // reset returns every PCR to its power-on value (all-zero) — the TPM_SU_CLEAR
 // behavior for the resettable PCRs the emulator models.
 func (s *pcrState) reset() {
-	for _, alg := range supportedPCRBanks {
+	algs := s.allocated
+	if algs == nil {
+		algs = supportedPCRBanks
+	}
+	s.banks = make(map[uint16][][]byte, len(algs))
+	for _, alg := range algs {
 		size := hashSize(alg)
 		bank := make([][]byte, numPCR)
 		for i := range bank {

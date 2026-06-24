@@ -17,9 +17,12 @@ import (
 
 // TPMA_SESSION attribute bits used by the processor.
 const (
-	attrContinue byte = 0x01 // continueSession: when clear, flush after the command
-	attrDecrypt  byte = 0x20 // the first command parameter is encrypted by the caller
-	attrEncrypt  byte = 0x40 // the TPM encrypts the first response parameter
+	attrContinue       byte = 0x01 // continueSession: when clear, flush after the command
+	attrAuditExclusive byte = 0x02 // the command must be the only one audited by the session
+	attrAuditReset     byte = 0x04 // reset the session audit digest before recording
+	attrDecrypt        byte = 0x20 // the first command parameter is encrypted by the caller
+	attrEncrypt        byte = 0x40 // the TPM encrypts the first response parameter
+	attrAudit          byte = 0x80 // the session records a running audit digest
 )
 
 // commandAuth is the parsed authorization context of a command: its handles, the
@@ -262,6 +265,9 @@ func (t *TPM) authResponse(ac *commandAuth, respHandles []uint32, rpParams []byt
 			t.sessions.flush(s.handle)
 		}
 	}
+
+	// Audit (session + command) covers cpHash/rpHash over the plaintext response.
+	t.recordAudit(ac, rpParams)
 
 	// Encrypt the first response parameter for an encrypt session (after the HMACs,
 	// which cover the plaintext).

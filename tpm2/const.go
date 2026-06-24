@@ -74,14 +74,33 @@ const (
 
 	// Signing, sealing and attestation (Phase 5).
 	CCCertify         uint32 = 0x00000148 // TPM2_Certify
-	CCGetTime         uint32 = 0x0000014C // TPM2_GetTime
-	CCHMAC            uint32 = 0x00000155 // TPM2_HMAC
-	CCQuote           uint32 = 0x00000158 // TPM2_Quote
-	CCSign            uint32 = 0x0000015D // TPM2_Sign
-	CCUnseal          uint32 = 0x0000015E // TPM2_Unseal
-	CCVerifySignature uint32 = 0x00000177 // TPM2_VerifySignature
-	CCHash            uint32 = 0x0000017D // TPM2_Hash
-	CCReadClock       uint32 = 0x00000181 // TPM2_ReadClock
+	CCCertifyCreation uint32 = 0x0000014A // TPM2_CertifyCreation
+	CCCertifyX509     uint32 = 0x00000197 // TPM2_CertifyX509
+
+	// Clock / PCR extras (Phase 6).
+	CCClockSet        uint32 = 0x00000128 // TPM2_ClockSet
+	CCClockRateAdjust uint32 = 0x00000130 // TPM2_ClockRateAdjust
+	CCPCREvent        uint32 = 0x0000013C // TPM2_PCR_Event
+
+	// PCR/NV structural commands (Phase 6b).
+	CCNVUndefineSpaceSpecial uint32 = 0x0000011F // TPM2_NV_UndefineSpaceSpecial
+	CCPCRAllocate            uint32 = 0x0000012B // TPM2_PCR_Allocate
+	CCPCRSetAuthPolicy       uint32 = 0x0000012C // TPM2_PCR_SetAuthPolicy
+	CCPCRSetAuthValue        uint32 = 0x00000183 // TPM2_PCR_SetAuthValue
+	CCGetTime                uint32 = 0x0000014C // TPM2_GetTime
+	CCHMAC                   uint32 = 0x00000155 // TPM2_HMAC
+	CCQuote                  uint32 = 0x00000158 // TPM2_Quote
+	CCSign                   uint32 = 0x0000015D // TPM2_Sign
+	CCUnseal                 uint32 = 0x0000015E // TPM2_Unseal
+	CCVerifySignature        uint32 = 0x00000177 // TPM2_VerifySignature
+	CCHash                   uint32 = 0x0000017D // TPM2_Hash
+	CCReadClock              uint32 = 0x00000181 // TPM2_ReadClock
+	CCNVCertify              uint32 = 0x00000184 // TPM2_NV_Certify
+
+	// Audit (Phase 5c).
+	CCGetCommandAuditDigest     uint32 = 0x00000133 // TPM2_GetCommandAuditDigest
+	CCSetCommandCodeAuditStatus uint32 = 0x00000140 // TPM2_SetCommandCodeAuditStatus
+	CCGetSessionAuditDigest     uint32 = 0x0000014D // TPM2_GetSessionAuditDigest
 
 	// Asymmetric primitives (Phase 1).
 	CCRSAEncrypt    uint32 = 0x00000174 // TPM2_RSA_Encrypt
@@ -141,7 +160,13 @@ const tpmGeneratedValue uint32 = 0xFF544347
 
 // Attestation structure tags (TPM_ST).
 const (
-	STAttestQuote uint16 = 0x8018 // TPM_ST_ATTEST_QUOTE
+	STAttestNV           uint16 = 0x8014 // TPM_ST_ATTEST_NV
+	STAttestCommandAudit uint16 = 0x8015 // TPM_ST_ATTEST_COMMAND_AUDIT
+	STAttestSessionAudit uint16 = 0x8016 // TPM_ST_ATTEST_SESSION_AUDIT
+	STAttestCertify      uint16 = 0x8017 // TPM_ST_ATTEST_CERTIFY
+	STAttestQuote        uint16 = 0x8018 // TPM_ST_ATTEST_QUOTE
+	STAttestTime         uint16 = 0x8019 // TPM_ST_ATTEST_TIME
+	STAttestCreation     uint16 = 0x801A // TPM_ST_ATTEST_CREATION
 )
 
 // TPMA_NV NT field values (the NV index type).
