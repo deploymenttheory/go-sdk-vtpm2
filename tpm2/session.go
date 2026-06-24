@@ -26,9 +26,12 @@ type authSession struct {
 	symmetric   symDef // cipher for parameter/response encryption (may be NULL)
 
 	// Policy-session accumulators (TPM 2.0 Part 1, §23.2.3):
-	policyDigest []byte // current policy digest
-	commandCode  uint32 // PolicyCommandCode restriction (0 ⇒ unset)
-	policyAuth   bool   // PolicyAuthValue was invoked
+	policyDigest   []byte // current policy digest
+	commandCode    uint32 // PolicyCommandCode restriction (0 ⇒ unset)
+	policyAuth     bool   // PolicyAuthValue / PolicyPassword was invoked
+	policyCpHash   []byte // PolicyCpHash restriction (nil ⇒ unset)
+	hasLocality    bool   // PolicyLocality was invoked
+	policyLocality byte   // PolicyLocality bitmap (localities 0..4)
 }
 
 // sessionTable holds the live sessions, keyed by handle (in the 0x02xxxxxx range).
@@ -195,10 +198,10 @@ func (t *TPM) cmdFlushContext(r *reader) []byte {
 		}
 		return successResponse(nil, 0)
 	case htTransient:
-		if !t.objects.flushTransient(flushHandle) {
-			return errorResponse(withHandle(RCHandle, 1))
+		if t.objects.flushTransient(flushHandle) || t.sequences.flush(flushHandle) {
+			return successResponse(nil, 0)
 		}
-		return successResponse(nil, 0)
+		return errorResponse(withHandle(RCHandle, 1))
 	default:
 		return errorResponse(withHandle(RCHandle, 1))
 	}

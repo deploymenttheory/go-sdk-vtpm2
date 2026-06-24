@@ -79,6 +79,9 @@ func (t *TPM) entityAuthValue(handle uint32) []byte {
 		if o, ok := t.objects.get(handle); ok {
 			return o.sensitive.AuthValue
 		}
+		if s, ok := t.sequences.get(handle); ok { // sequence objects share the transient range
+			return s.auth
+		}
 	case htNVIndex:
 		if idx, ok := t.nv.get(handle); ok {
 			return idx.authValue
@@ -180,6 +183,15 @@ func (t *TPM) verifyAuth(ac *commandAuth, sessionIdx int, entityName, authValue,
 			}
 			if as.commandCode != 0 && as.commandCode != ac.cc {
 				return errorResponse(RCPolicyCC)
+			}
+			if as.hasLocality && as.policyLocality&(1<<t.locality) == 0 {
+				return errorResponse(RCLocality) // PolicyLocality: wrong command locality
+			}
+			if len(as.policyCpHash) != 0 { // PolicyCpHash: bind to this exact command
+				cph := cpHash(as.authHash, ac.cc, t.commandHandleNames(ac), ac.cpParams)
+				if !hmac.Equal(as.policyCpHash, cph) {
+					return errorResponse(withSession(RCPolicyFail, sessionIdx+1))
+				}
 			}
 			if as.policyAuth { // PolicyAuthValue: also prove the authValue via HMAC
 				cph := cpHash(as.authHash, ac.cc, t.commandHandleNames(ac), ac.cpParams)

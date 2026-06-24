@@ -82,6 +82,50 @@ const (
 	CCVerifySignature uint32 = 0x00000177 // TPM2_VerifySignature
 	CCHash            uint32 = 0x0000017D // TPM2_Hash
 	CCReadClock       uint32 = 0x00000181 // TPM2_ReadClock
+
+	// Asymmetric primitives (Phase 1).
+	CCRSAEncrypt    uint32 = 0x00000174 // TPM2_RSA_Encrypt
+	CCRSADecrypt    uint32 = 0x00000159 // TPM2_RSA_Decrypt
+	CCECDHKeyGen    uint32 = 0x00000163 // TPM2_ECDH_KeyGen
+	CCECDHZGen      uint32 = 0x00000154 // TPM2_ECDH_ZGen
+	CCECCParameters uint32 = 0x00000178 // TPM2_ECC_Parameters
+
+	// Hash/HMAC sequences (Phase 2). TPM_CC_HMAC/TPM_CC_MAC and HMAC_Start/MAC_Start
+	// share a code; the same handlers serve both names.
+	CCHMACStart             uint32 = 0x0000015B // TPM2_HMAC_Start (= TPM2_MAC_Start)
+	CCHashSequenceStart     uint32 = 0x00000186 // TPM2_HashSequenceStart
+	CCSequenceUpdate        uint32 = 0x0000015C // TPM2_SequenceUpdate
+	CCSequenceComplete      uint32 = 0x0000013E // TPM2_SequenceComplete
+	CCEventSequenceComplete uint32 = 0x00000185 // TPM2_EventSequenceComplete
+
+	// Policy assertions (Phase 3a — simple digest-extend assertions).
+	CCPolicyCpHash           uint32 = 0x0000016E // TPM2_PolicyCpHash
+	CCPolicyLocality         uint32 = 0x0000016F // TPM2_PolicyLocality
+	CCPolicyNameHash         uint32 = 0x00000170 // TPM2_PolicyNameHash
+	CCPolicyPhysicalPresence uint32 = 0x00000187 // TPM2_PolicyPhysicalPresence
+	CCPolicyPassword         uint32 = 0x0000018C // TPM2_PolicyPassword
+	CCPolicyNvWritten        uint32 = 0x0000018F // TPM2_PolicyNvWritten
+	CCPolicyTemplate         uint32 = 0x00000190 // TPM2_PolicyTemplate
+
+	// Policy comparison assertions (Phase 3b).
+	CCPolicyNV           uint32 = 0x00000149 // TPM2_PolicyNV
+	CCPolicyCounterTimer uint32 = 0x0000016D // TPM2_PolicyCounterTimer
+
+	// Policy auth/verification assertions (Phase 3c).
+	CCPolicySecret    uint32 = 0x00000151 // TPM2_PolicySecret
+	CCPolicySigned    uint32 = 0x00000160 // TPM2_PolicySigned
+	CCPolicyAuthorize uint32 = 0x0000016A // TPM2_PolicyAuthorize
+
+	// Remaining policy assertions (Phase 3d).
+	CCPolicyTicket            uint32 = 0x00000172 // TPM2_PolicyTicket
+	CCPolicyDuplicationSelect uint32 = 0x00000188 // TPM2_PolicyDuplicationSelect
+	CCPolicyAuthorizeNV       uint32 = 0x00000192 // TPM2_PolicyAuthorizeNV
+	CCPolicyCapability        uint32 = 0x0000019B // TPM2_PolicyCapability
+	CCPolicyParameters        uint32 = 0x0000019C // TPM2_PolicyParameters
+
+	// TPM2_Duplicate (Phase 4) — referenced now by PolicyDuplicationSelect's
+	// implicit command-code restriction.
+	CCDuplicate uint32 = 0x0000014B // TPM2_Duplicate
 )
 
 // TPM_GENERATED_VALUE prefixes a TPM-produced attestation structure.
@@ -102,9 +146,11 @@ const (
 
 // Structure tags (TPM_ST) for tickets.
 const (
-	STCreation  uint16 = 0x8021 // TPM_ST_CREATION
-	STVerified  uint16 = 0x8022 // TPM_ST_VERIFIED
-	STHashCheck uint16 = 0x8024 // TPM_ST_HASHCHECK
+	STCreation   uint16 = 0x8021 // TPM_ST_CREATION
+	STVerified   uint16 = 0x8022 // TPM_ST_VERIFIED
+	STAuthSecret uint16 = 0x8023 // TPM_ST_AUTH_SECRET
+	STHashCheck  uint16 = 0x8024 // TPM_ST_HASHCHECK
+	STAuthSigned uint16 = 0x8025 // TPM_ST_AUTH_SIGNED
 )
 
 // Session types (TPM_SE), the sessionType parameter of TPM2_StartAuthSession.
@@ -148,6 +194,8 @@ const (
 
 	// Format-one codes: RC_FMT1 + number.
 	rcFmt1         uint32 = 0x080          // RC_FMT1 base
+	RCHash         uint32 = rcFmt1 + 0x003 // TPM_RC_HASH (0x083)
+	RCMode         uint32 = rcFmt1 + 0x009 // TPM_RC_MODE (0x089)
 	RCAttributes   uint32 = rcFmt1 + 0x002 // TPM_RC_ATTRIBUTES (0x082)
 	RCValue        uint32 = rcFmt1 + 0x004 // TPM_RC_VALUE  (0x084)
 	RCHierarchy    uint32 = rcFmt1 + 0x005 // TPM_RC_HIERARCHY (0x085)
@@ -163,9 +211,10 @@ const (
 	RCIntegrity    uint32 = rcFmt1 + 0x01F // TPM_RC_INTEGRITY (0x09F)
 	RCBadAuth      uint32 = rcFmt1 + 0x022 // TPM_RC_BAD_AUTH (0x0A2)
 	RCTicket       uint32 = rcFmt1 + 0x020 // TPM_RC_TICKET (0x0A0)
+	RCECCPoint     uint32 = rcFmt1 + 0x027 // TPM_RC_ECC_POINT (0x0A7)
 	RCPolicyCC     uint32 = rcFmt1 + 0x024 // TPM_RC_POLICY_CC (0x0A4)
-	RCSignature    uint32 = rcFmt1 + 0x05B // TPM_RC_SIGNATURE (0x0DB)
-	RCKey          uint32 = rcFmt1 + 0x07B // TPM_RC_KEY (0x0FB)
+	RCSignature    uint32 = rcFmt1 + 0x01B // TPM_RC_SIGNATURE (0x09B)
+	RCKey          uint32 = rcFmt1 + 0x01C // TPM_RC_KEY (0x09C)
 
 	// Warning codes: RC_WARN + number.
 	rcWarn           uint32 = 0x900          // RC_WARN base
@@ -335,7 +384,7 @@ const (
 
 	PTFamilyIndicator  uint32 = ptFixed + 0x000 // "2.0\0"
 	PTLevel            uint32 = ptFixed + 0x001
-	PTRevision         uint32 = ptFixed + 0x002 // spec revision × 100
+	PTRevision         uint32 = ptFixed + 0x002 // reports TPM_SPEC_VERSION (= 185 for v1.85; since v184 not ×100)
 	PTDayOfYear        uint32 = ptFixed + 0x003
 	PTYear             uint32 = ptFixed + 0x004
 	PTManufacturer     uint32 = ptFixed + 0x005

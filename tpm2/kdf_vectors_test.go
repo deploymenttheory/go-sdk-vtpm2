@@ -12,7 +12,7 @@ import (
 )
 
 // Known-answer vectors for KDFa (SP800-108 counter mode, TPM 2.0 Part 1
-// §11.4.10.2) and KDFe (SP800-56A, §11.4.10.3). The expected outputs were
+// §8.4.10.2) and KDFe (SP800-56A, §8.4.10.3). The expected outputs were
 // produced by an independent, spec-faithful reference implementation (the same
 // shape go-tpm's KDF tests use), so these pin our kdfa/kdfe to externally-derived
 // bytes — not to our own implementation.

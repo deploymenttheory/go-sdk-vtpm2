@@ -19,8 +19,8 @@ type taggedProperty struct {
 var fixedProperties = []taggedProperty{
 	{PTFamilyIndicator, 0x322E3000}, // "2.0\0"
 	{PTLevel, 0},
-	{PTRevision, 164}, // spec revision 1.64
-	{PTDayOfYear, 1},
+	{PTRevision, 185}, // TPM_SPEC_VERSION; since v184 PT_REVISION = TPM_SPEC_VERSION (not ×100)
+	{PTDayOfYear, 71}, // 2026-03-12, the v1.85 release date
 	{PTYear, 2026},
 	{PTManufacturer, 0x44505448},  // "DPTH"
 	{PTVendorString1, 0x76747061}, // "vtpa" (vtpm2)
@@ -82,29 +82,47 @@ var commandTable = []struct {
 	{CCDictionaryAttackLockReset, 1},
 	{CCDictionaryAttackParameters, 1},
 	{CCPCRReset, 1},
+	{CCSequenceComplete, 1}, // 0x13E
 	{CCSelfTest, 0},
 	{CCStartup, 0},
 	{CCShutdown, 0},
 	{CCStirRandom, 0},
+	{CCPolicyNV, 3}, // 0x149 (authHandle, nvIndex, policySession)
 	{CCNVRead, 2},
 	{CCNVReadLock, 2},
 	{CCObjectChangeAuth, 2}, // objectHandle, parentHandle
+	{CCPolicySecret, 2},     // 0x151 (authHandle, policySession)
 	{CCCreate, 1},
+	{CCECDHZGen, 1}, // 0x154
+	{CCHMAC, 1},     // 0x155 (= TPM2_MAC)
 	{CCLoad, 1},
 	{CCQuote, 1},
+	{CCRSADecrypt, 1},     // 0x159
+	{CCHMACStart, 1},      // 0x15B (= TPM2_MAC_Start)
+	{CCSequenceUpdate, 1}, // 0x15C
 	{CCSign, 1},
 	{CCUnseal, 1},
+	{CCPolicySigned, 2}, // 0x160 (authObject, policySession)
 	{CCContextLoad, 0},  // context is a parameter
 	{CCContextSave, 1},  // saveHandle
+	{CCECDHKeyGen, 1},   // 0x163
 	{CCFlushContext, 0}, // flushHandle is a parameter, not a command handle
 	{CCLoadExternal, 0},
 	{CCNVReadPublic, 1},
+	{CCPolicyAuthorize, 1}, // 0x16A
 	{CCPolicyAuthValue, 1},
 	{CCPolicyCommandCode, 1},
+	{CCPolicyCounterTimer, 1}, // 0x16D
+	{CCPolicyCpHash, 1},       // 0x16E
+	{CCPolicyLocality, 1},     // 0x16F
+	{CCPolicyNameHash, 1},     // 0x170
 	{CCPolicyOR, 1},
+	{CCPolicyTicket, 1}, // 0x172
 	{CCReadPublic, 1},
+	{CCRSAEncrypt, 1},       // 0x174
 	{CCStartAuthSession, 2}, // tpmKey, bind
 	{CCVerifySignature, 1},
+	{CCECCParameters, 0}, // 0x178 (no handle)
 	{CCGetCapability, 0},
 	{CCGetRandom, 0},
 	{CCGetTestResult, 0},
@@ -114,7 +132,17 @@ var commandTable = []struct {
 	{CCPolicyRestart, 1},
 	{CCReadClock, 0},
 	{CCPCRExtend, 1},
+	{CCEventSequenceComplete, 2},   // 0x185 (pcrHandle, sequenceHandle)
+	{CCHashSequenceStart, 0},       // 0x186 (no handle)
+	{CCPolicyPhysicalPresence, 1},  // 0x187
+	{CCPolicyDuplicationSelect, 1}, // 0x188
 	{CCPolicyGetDigest, 1},
+	{CCPolicyPassword, 1},    // 0x18C
+	{CCPolicyNvWritten, 1},   // 0x18F
+	{CCPolicyTemplate, 1},    // 0x190
+	{CCPolicyAuthorizeNV, 3}, // 0x192 (authHandle, nvIndex, policySession)
+	{CCPolicyCapability, 1},  // 0x19B
+	{CCPolicyParameters, 1},  // 0x19C
 }
 
 // cmdGetCapability implements TPM2_GetCapability for the capabilities the

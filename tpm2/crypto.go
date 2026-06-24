@@ -79,7 +79,7 @@ func hmacSum(alg uint16, key []byte, parts ...[]byte) []byte {
 	return m.Sum(nil)
 }
 
-// kdfa implements KDFa (TPM 2.0 Part 1, §11.4.10.2): SP800-108 counter-mode
+// kdfa implements KDFa (TPM 2.0 Part 1, §8.4.10.2): SP800-108 counter-mode
 // HMAC. It derives bits bits of key material; the label is the use string
 // (without its terminating null, which kdfa appends). The high bits of the first
 // output byte are masked when bits is not a multiple of 8.
@@ -435,7 +435,7 @@ func eccPrivateKey(curve elliptic.Curve, curveID uint16, d []byte) *ecdsa.Privat
 	return priv
 }
 
-// kdfe implements KDFe (TPM 2.0 Part 1, §11.4.10.3): the SP800-56A concatenation
+// kdfe implements KDFe (TPM 2.0 Part 1, §8.4.10.3): the SP800-56A concatenation
 // KDF used for ECDH secret derivation. z is the shared secret; the label is
 // appended with a terminating null.
 func kdfe(alg uint16, z, label, partyU, partyV []byte, bits int) []byte {

@@ -91,6 +91,21 @@ func (ot *objectTable) evict(persistentHandle uint32) bool {
 	return false
 }
 
+// clearStorageEndorsement flushes all transient objects and the persistent
+// objects below platformBase (the Storage and Endorsement hierarchies), keeping
+// platform-hierarchy persistent objects — the object portion of TPM2_Clear
+// (TPM 2.0 Part 3, §24.6.1: "flush resident objects (persistent and volatile) in
+// the Storage and Endorsement hierarchies").
+func (ot *objectTable) clearStorageEndorsement(platformBase uint32) {
+	ot.transient = make(map[uint32]*object)
+	ot.nextTrans = htTransient + 1
+	for h := range ot.persistent {
+		if h < platformBase {
+			delete(ot.persistent, h)
+		}
+	}
+}
+
 // persistentHandles returns the persistent object handles in ascending order
 // from low to high (for TPM_CAP_HANDLES); callers sort if needed.
 func (ot *objectTable) persistentHandles() []uint32 {

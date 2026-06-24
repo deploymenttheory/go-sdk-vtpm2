@@ -138,6 +138,42 @@ func TestRestrictedSignNeedsTicket(t *testing.T) {
 	}
 }
 
+// TestClearFlushesStorageAndResetsClock covers the completed TPM2_Clear
+// (Part 3 §24.6.1): owner/endorsement persistent objects and owner-created NV are
+// removed, platform-hierarchy state survives, and the Clock + counters are zeroed.
+func TestClearFlushesStorageAndResetsClock(t *testing.T) {
+	tpm := New()
+	startup(t, tpm)
+	srk, _, _ := createPrimary(t, tpm, RHOwner, eccStorageTemplate())
+	evictControl(t, tpm, RHOwner, srk, 0x81000001) // owner persistent (must be flushed)
+
+	// Platform-hierarchy state that must SURVIVE Clear.
+	tpm.objects.persistent[0x81800001] = &object{name: []byte("platform-obj")}
+	tpm.nv.indices[0x01800020] = &nvIndex{public: nvPublic{Index: 0x01800020, Attrs: NVPlatformCreate}}
+	// Owner-created NV (PLATFORMCREATE clear) that must be DELETED.
+	tpm.nv.indices[0x01000010] = &nvIndex{public: nvPublic{Index: 0x01000010, Attrs: NVOwnerWrite}}
+	tpm.clock.resetCount, tpm.clock.clock, tpm.clock.safe = 7, 12345, 0
+
+	if _, rc, _ := parseResp(t, tpm.Execute(buildHierarchyCmd(CCClear, RHPlatform, nil, nil))); rc != RCSuccess {
+		t.Fatalf("Clear rc = 0x%x", rc)
+	}
+	if _, ok := tpm.objects.get(0x81000001); ok {
+		t.Fatal("owner persistent object survived Clear")
+	}
+	if _, ok := tpm.objects.get(0x81800001); !ok {
+		t.Fatal("platform persistent object was wrongly flushed by Clear")
+	}
+	if _, ok := tpm.nv.get(0x01000010); ok {
+		t.Fatal("owner-created NV survived Clear")
+	}
+	if _, ok := tpm.nv.get(0x01800020); !ok {
+		t.Fatal("platform-created NV (PLATFORMCREATE) was wrongly deleted by Clear")
+	}
+	if tpm.clock.resetCount != 0 || tpm.clock.clock != 0 || tpm.clock.safe != 1 {
+		t.Fatalf("clock not reset by Clear: reset=%d clock=%d safe=%d", tpm.clock.resetCount, tpm.clock.clock, tpm.clock.safe)
+	}
+}
+
 // TestVerifiedTicketKeyedByProof covers #2: the TPM2_VerifySignature ticket is
 // keyed by the hierarchy proof, not a volatile internal key.
 func TestVerifiedTicketKeyedByProof(t *testing.T) {

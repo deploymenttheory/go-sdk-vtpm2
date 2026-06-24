@@ -32,6 +32,17 @@ func newNVStore() *nvStore { return &nvStore{indices: make(map[uint32]*nvIndex)}
 
 func (s *nvStore) get(h uint32) (*nvIndex, bool) { i, ok := s.indices[h]; return i, ok }
 
+// clearOwnerCreated deletes every NV Index that is not platform-created
+// (TPMA_NV_PLATFORMCREATE CLEAR), as required by TPM2_Clear (Part 3, §24.6.1:
+// "delete any NV Index with TPMA_NV_PLATFORMCREATE == CLEAR").
+func (s *nvStore) clearOwnerCreated() {
+	for h, idx := range s.indices {
+		if idx.public.Attrs&NVPlatformCreate == 0 {
+			delete(s.indices, h)
+		}
+	}
+}
+
 func (s *nvStore) handles() []uint32 {
 	hs := make([]uint32, 0, len(s.indices))
 	for h := range s.indices {

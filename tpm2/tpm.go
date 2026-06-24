@@ -19,16 +19,17 @@ const headerLen = 10
 // for concurrent Execute calls (the TPM model is single-threaded, so calls are
 // serialized internally).
 type TPM struct {
-	mu       sync.Mutex
-	pcr      *pcrState
-	h        *hierarchies
-	sessions *sessionTable
-	objects  *objectTable
-	nv       *nvStore
-	da       *daState
-	clock    *clockState
-	locality byte // locality of the current command (set via the transport)
-	rand     io.Reader
+	mu        sync.Mutex
+	pcr       *pcrState
+	h         *hierarchies
+	sessions  *sessionTable
+	objects   *objectTable
+	sequences *sequenceTable
+	nv        *nvStore
+	da        *daState
+	clock     *clockState
+	locality  byte // locality of the current command (set via the transport)
+	rand      io.Reader
 	// contextKey protects saved contexts (TPM2_ContextSave); it is volatile and
 	// regenerated on reset, so saved contexts do not survive a reboot.
 	contextKey []byte
@@ -46,6 +47,7 @@ func New() *TPM {
 		h:          newHierarchies(),
 		sessions:   newSessionTable(),
 		objects:    newObjectTable(),
+		sequences:  newSequenceTable(),
 		nv:         newNVStore(),
 		da:         newDAState(),
 		clock:      newClockState(),
@@ -195,6 +197,62 @@ func (t *TPM) Execute(cmd []byte) []byte {
 		return t.cmdQuote(tag, r)
 	case CCReadClock:
 		return t.cmdReadClock(r)
+	case CCRSAEncrypt:
+		return t.cmdRSAEncrypt(r)
+	case CCRSADecrypt:
+		return t.cmdRSADecrypt(tag, r)
+	case CCECDHKeyGen:
+		return t.cmdECDHKeyGen(r)
+	case CCECDHZGen:
+		return t.cmdECDHZGen(tag, r)
+	case CCECCParameters:
+		return t.cmdECCParameters(r)
+	case CCHMAC:
+		return t.cmdHMAC(tag, r)
+	case CCHMACStart:
+		return t.cmdHMACStart(tag, r)
+	case CCHashSequenceStart:
+		return t.cmdHashSequenceStart(r)
+	case CCSequenceUpdate:
+		return t.cmdSequenceUpdate(tag, r)
+	case CCSequenceComplete:
+		return t.cmdSequenceComplete(tag, r)
+	case CCEventSequenceComplete:
+		return t.cmdEventSequenceComplete(tag, r)
+	case CCPolicyCpHash:
+		return t.cmdPolicyCpHash(r)
+	case CCPolicyNameHash:
+		return t.cmdPolicyNameHash(r)
+	case CCPolicyLocality:
+		return t.cmdPolicyLocality(r)
+	case CCPolicyPhysicalPresence:
+		return t.cmdPolicyPhysicalPresence(r)
+	case CCPolicyPassword:
+		return t.cmdPolicyPassword(r)
+	case CCPolicyNvWritten:
+		return t.cmdPolicyNvWritten(r)
+	case CCPolicyTemplate:
+		return t.cmdPolicyTemplate(r)
+	case CCPolicyCounterTimer:
+		return t.cmdPolicyCounterTimer(r)
+	case CCPolicyNV:
+		return t.cmdPolicyNV(tag, r)
+	case CCPolicySecret:
+		return t.cmdPolicySecret(tag, r)
+	case CCPolicySigned:
+		return t.cmdPolicySigned(r)
+	case CCPolicyAuthorize:
+		return t.cmdPolicyAuthorize(r)
+	case CCPolicyTicket:
+		return t.cmdPolicyTicket(r)
+	case CCPolicyAuthorizeNV:
+		return t.cmdPolicyAuthorizeNV(tag, r)
+	case CCPolicyDuplicationSelect:
+		return t.cmdPolicyDuplicationSelect(r)
+	case CCPolicyCapability:
+		return t.cmdPolicyCapability(r)
+	case CCPolicyParameters:
+		return t.cmdPolicyParameters(r)
 	default:
 		return errorResponse(RCCommandCode)
 	}
@@ -214,6 +272,7 @@ func (t *TPM) Init(deleteVolatile bool) {
 	t.h.reset()                    // regenerate the volatile null-hierarchy seed, restore enables
 	t.sessions = newSessionTable() // sessions are volatile: dropped on reset
 	t.objects.resetTransient()     // transient objects are volatile; persistent ones remain
+	t.sequences.reset()            // hash/HMAC sequences are volatile
 	t.contextKey = randomSeed()    // invalidate any previously saved contexts
 	if deleteVolatile {
 		t.pcr.reset()

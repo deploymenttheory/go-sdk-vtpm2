@@ -213,5 +213,126 @@ func (t *TPM) cmdPolicyRestart(r *reader) []byte {
 	s.policyDigest = make([]byte, hashSize(s.authHash))
 	s.commandCode = 0
 	s.policyAuth = false
+	s.policyCpHash = nil
+	s.hasLocality = false
+	s.policyLocality = 0
+	return successResponse(nil, 0)
+}
+
+// cmdPolicyCpHash implements TPM2_PolicyCpHash (Part 3, §23.11): bind the policy to
+// a specific command and its parameters via cpHashA.
+func (t *TPM) cmdPolicyCpHash(r *reader) []byte {
+	s, errResp := t.policySession(r)
+	if errResp != nil {
+		return errResp
+	}
+	cpHashA := r.tpm2b()
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	if len(s.policyCpHash) != 0 && !bytes.Equal(s.policyCpHash, cpHashA) {
+		return errorResponse(withParam(RCValue, 1)) // already bound to a different cpHash
+	}
+	if len(cpHashA) != 0 && len(cpHashA) != hashSize(s.authHash) {
+		return errorResponse(withParam(RCSize, 1))
+	}
+	s.policyCpHash = append([]byte(nil), cpHashA...)
+	s.extend(be32(CCPolicyCpHash), cpHashA)
+	return successResponse(nil, 0)
+}
+
+// cmdPolicyNameHash implements TPM2_PolicyNameHash (Part 3, §23.12): bind the
+// policy to the Names of the command's handles via nameHash.
+func (t *TPM) cmdPolicyNameHash(r *reader) []byte {
+	s, errResp := t.policySession(r)
+	if errResp != nil {
+		return errResp
+	}
+	nameHash := r.tpm2b()
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	s.extend(be32(CCPolicyNameHash), nameHash)
+	return successResponse(nil, 0)
+}
+
+// cmdPolicyLocality implements TPM2_PolicyLocality (Part 3, §23.9): restrict the
+// policy to a set of localities. Repeated calls AND the bitmaps.
+func (t *TPM) cmdPolicyLocality(r *reader) []byte {
+	s, errResp := t.policySession(r)
+	if errResp != nil {
+		return errResp
+	}
+	locality := r.u8() // TPMA_LOCALITY bitmap (localities 0..4)
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	if locality == 0 {
+		return errorResponse(withParam(RCValue, 1))
+	}
+	if s.hasLocality {
+		if s.policyLocality&locality == 0 {
+			return errorResponse(withParam(RCValue, 1)) // contradicts the prior restriction
+		}
+		s.policyLocality &= locality
+	} else {
+		s.policyLocality = locality
+		s.hasLocality = true
+	}
+	s.extend(be32(CCPolicyLocality), []byte{locality})
+	return successResponse(nil, 0)
+}
+
+// cmdPolicyPhysicalPresence implements TPM2_PolicyPhysicalPresence (Part 3,
+// §23.10): require physical-presence assertion at use time.
+func (t *TPM) cmdPolicyPhysicalPresence(r *reader) []byte {
+	s, errResp := t.policySession(r)
+	if errResp != nil {
+		return errResp
+	}
+	s.extend(be32(CCPolicyPhysicalPresence))
+	return successResponse(nil, 0)
+}
+
+// cmdPolicyPassword implements TPM2_PolicyPassword (Part 3, §23.18): require the
+// object's authValue as a plaintext password at use. It folds the same digest as
+// PolicyAuthValue (TPM_CC_PolicyAuthValue).
+func (t *TPM) cmdPolicyPassword(r *reader) []byte {
+	s, errResp := t.policySession(r)
+	if errResp != nil {
+		return errResp
+	}
+	s.policyAuth = true
+	s.extend(be32(CCPolicyAuthValue)) // same digest as PolicyAuthValue
+	return successResponse(nil, 0)
+}
+
+// cmdPolicyNvWritten implements TPM2_PolicyNvWritten (Part 3, §23.14): bind the
+// policy to the TPMA_NV_WRITTEN state of an NV Index.
+func (t *TPM) cmdPolicyNvWritten(r *reader) []byte {
+	s, errResp := t.policySession(r)
+	if errResp != nil {
+		return errResp
+	}
+	writtenSet := r.u8() // TPMI_YES_NO
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	s.extend(be32(CCPolicyNvWritten), []byte{writtenSet})
+	return successResponse(nil, 0)
+}
+
+// cmdPolicyTemplate implements TPM2_PolicyTemplate (Part 3, §23.15): bind the
+// policy to a creation template via templateHash.
+func (t *TPM) cmdPolicyTemplate(r *reader) []byte {
+	s, errResp := t.policySession(r)
+	if errResp != nil {
+		return errResp
+	}
+	templateHash := r.tpm2b()
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	s.extend(be32(CCPolicyTemplate), templateHash)
 	return successResponse(nil, 0)
 }

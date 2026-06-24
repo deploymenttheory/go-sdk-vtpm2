@@ -110,6 +110,35 @@ func (t *TPM) cmdSign(tag uint16, r *reader) []byte {
 	return t.authResponse(ac, nil, sig)
 }
 
+// verifySignature reads the TPMU_SIGNATURE for key's type from r and verifies it
+// over digest, returning false on any parse or verification failure. Shared by
+// TPM2_VerifySignature and TPM2_PolicySigned.
+func verifySignature(key *object, sigAlg, hashAlg uint16, digest []byte, r *reader) bool {
+	ch, hashOK := cryptoHash(hashAlg)
+	switch key.public.Type {
+	case AlgRSA:
+		sig := r.tpm2b()
+		if r.err != nil || !hashOK {
+			return false
+		}
+		pub := &rsa.PublicKey{N: new(big.Int).SetBytes(key.public.Unique), E: rsaExp(key.public.Exp)}
+		if sigAlg == AlgRSAPSS {
+			return rsa.VerifyPSS(pub, ch, digest, sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: ch}) == nil
+		}
+		return rsa.VerifyPKCS1v15(pub, ch, digest, sig) == nil
+	case AlgECC:
+		rb := r.tpm2b()
+		sb := r.tpm2b()
+		curve := curveFor(key.public.Curve)
+		if r.err != nil || curve == nil {
+			return false
+		}
+		pub := &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(key.public.UniqueX), Y: new(big.Int).SetBytes(key.public.UniqueY)}
+		return ecdsa.Verify(pub, digest, new(big.Int).SetBytes(rb), new(big.Int).SetBytes(sb))
+	}
+	return false
+}
+
 // cmdVerifySignature implements TPM2_VerifySignature (no authorization).
 func (t *TPM) cmdVerifySignature(r *reader) []byte {
 	keyHandle := r.u32()
@@ -123,37 +152,13 @@ func (t *TPM) cmdVerifySignature(r *reader) []byte {
 	if !ok {
 		return errorResponse(withHandle(RCHandle, 1))
 	}
-	ch, hashOK := cryptoHash(hashAlg)
-	valid := false
-	switch key.public.Type {
-	case AlgRSA:
-		sig := r.tpm2b()
-		if r.err != nil || !hashOK {
-			return errorResponse(RCInsufficient)
-		}
-		pub := &rsa.PublicKey{N: new(big.Int).SetBytes(key.public.Unique), E: rsaExp(key.public.Exp)}
-		switch sigAlg {
-		case AlgRSAPSS:
-			valid = rsa.VerifyPSS(pub, ch, digest, sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: ch}) == nil
-		default:
-			valid = rsa.VerifyPKCS1v15(pub, ch, digest, sig) == nil
-		}
-	case AlgECC:
-		rb := r.tpm2b()
-		sb := r.tpm2b()
+	if key.public.Type != AlgRSA && key.public.Type != AlgECC {
+		return errorResponse(withHandle(RCType, 1))
+	}
+	if !verifySignature(key, sigAlg, hashAlg, digest, r) {
 		if r.err != nil {
 			return errorResponse(RCInsufficient)
 		}
-		curve := curveFor(key.public.Curve)
-		if curve == nil {
-			return errorResponse(withParam(RCValue, 1))
-		}
-		pub := &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(key.public.UniqueX), Y: new(big.Int).SetBytes(key.public.UniqueY)}
-		valid = ecdsa.Verify(pub, digest, new(big.Int).SetBytes(rb), new(big.Int).SetBytes(sb))
-	default:
-		return errorResponse(withHandle(RCType, 1))
-	}
-	if !valid {
 		return errorResponse(RCSignature)
 	}
 	// TPMT_TK_VERIFIED, keyed by the NULL-hierarchy proof (the verification key is

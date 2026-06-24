@@ -97,10 +97,11 @@ func (t *TPM) hierarchyProof(handle uint32) []byte {
 	return proofFromSeed(hi.seed)
 }
 
-// clear models TPM2_Clear: a new storage primary seed and the owner, endorsement
-// and lockout auth/policy reset to empty; the storage and endorsement hierarchies
-// are re-enabled. The platform hierarchy, the EPS and the PPS are untouched, so
-// the EK survives (TPM 2.0 Part 3, TPM2_Clear).
+// clear performs the hierarchy portion of TPM2_Clear (Part 3, §24.6.1): a new
+// storage primary seed (SPS), the owner/endorsement/lockout auth and policy reset
+// to the Empty Buffer, and shEnable/ehEnable SET. The platform hierarchy, the EPS
+// and the PPS are untouched, so the EK is recreatable from the unchanged EPS even
+// though its loaded/persistent instance is flushed.
 func (h *hierarchies) clear() {
 	h.owner.seed = randomSeed()
 	h.owner.authValue, h.owner.authPolicy, h.owner.enabled = nil, nil, true
@@ -137,9 +138,18 @@ func (t *TPM) cmdClear(tag uint16, r *reader) []byte {
 	if t.h.disableClear && authHandle == RHLockout {
 		return errorResponse(RCDisabled) // Clear via lockout is disabled
 	}
+	// Full TPM2_Clear (Part 3, §24.6.1): new SPS + auth reset (clear()), flush the
+	// Storage/Endorsement objects, delete owner-created NV, reset DA, zero the Clock
+	// and the reset/restart counters, set Safe=YES, and advance the PCR counter.
 	t.h.clear()
-	t.da = newDAState()  // Clear resets the DA counters and parameters to defaults
-	t.clock.resetCount++ // a TPM reset of ownership
+	t.objects.clearStorageEndorsement(platformPersistentBase)
+	t.nv.clearOwnerCreated()
+	t.da = newDAState()
+	t.clock.clock = 0
+	t.clock.resetCount = 0
+	t.clock.restartCount = 0
+	t.clock.safe = 1 // YES
+	t.pcr.updateCounter++
 	return t.authResponse(ac, nil, nil)
 }
 
