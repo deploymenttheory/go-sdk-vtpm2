@@ -1,0 +1,181 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Deployment Theory.
+
+package tpm2
+
+import (
+	"crypto/ecdsa"
+	"crypto/rsa"
+	"math/big"
+)
+
+// This file implements signing, verification and hashing (TPM 2.0 Part 3, §20).
+// Signatures are produced/consumed as TPMT_SIGNATURE.
+
+// signWith signs digest with object o and returns a marshalled TPMT_SIGNATURE.
+// sigAlg/hashAlg come from the key's scheme (or the caller's inScheme).
+func (t *TPM) signWith(o *object, sigAlg, hashAlg uint16, digest []byte) ([]byte, []byte) {
+	ch, ok := cryptoHash(hashAlg)
+	if !ok {
+		return nil, errorResponse(withParam(RCValue, 2))
+	}
+	var w writer
+	switch o.public.Type {
+	case AlgRSA:
+		priv := rsaPrivateKey(o.public.Unique, o.sensitive.Secret, o.public.Exp)
+		var sig []byte
+		var err error
+		switch sigAlg {
+		case AlgRSAPSS:
+			sig, err = rsa.SignPSS(t.rand, priv, ch, digest, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: ch})
+		default: // RSASSA (PKCS#1 v1.5) is the default RSA signing scheme
+			sigAlg = AlgRSASSA
+			sig, err = rsa.SignPKCS1v15(t.rand, priv, ch, digest)
+		}
+		if err != nil {
+			return nil, errorResponse(RCValue)
+		}
+		w.u16(sigAlg)
+		w.u16(hashAlg)
+		w.tpm2b(sig)
+	case AlgECC:
+		curve := curveFor(o.public.Curve)
+		if curve == nil {
+			return nil, errorResponse(RCValue)
+		}
+		priv := eccPrivateKey(curve, o.sensitive.Secret)
+		rr, ss, err := ecdsa.Sign(t.rand, priv, digest)
+		if err != nil {
+			return nil, errorResponse(RCValue)
+		}
+		n := (curve.Params().BitSize + 7) / 8
+		w.u16(AlgECDSA)
+		w.u16(hashAlg)
+		w.tpm2b(padLeft(rr.Bytes(), n))
+		w.tpm2b(padLeft(ss.Bytes(), n))
+	default:
+		return nil, errorResponse(withHandle(RCType, 1))
+	}
+	return w.bytes(), nil
+}
+
+// cmdSign implements TPM2_Sign.
+func (t *TPM) cmdSign(tag uint16, r *reader) []byte {
+	ac, errResp := parseCommandAuth(tag, CCSign, 1, r) // keyHandle
+	if errResp != nil {
+		return errResp
+	}
+	digest := r.tpm2b()
+	scheme := r.u16() // inScheme (TPMT_SIG_SCHEME)
+	var schemeHash uint16
+	if scheme != AlgNull {
+		schemeHash = r.u16()
+	}
+	_ = r.u16() // validation (TPMT_TK_HASHCHECK): tag
+	_ = r.u32() // hierarchy
+	_ = r.tpm2b()
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	key, ok := t.objects.get(ac.handles[0])
+	if !ok {
+		return errorResponse(withHandle(RCHandle, 1))
+	}
+	if key.public.Attrs&ObjSign == 0 {
+		return errorResponse(withHandle(RCAttributes, 1)) // not a signing key
+	}
+	if errResp := t.authorizeObject(ac, 0, key); errResp != nil {
+		return errResp
+	}
+	// The key's own scheme takes precedence; otherwise use the caller's inScheme.
+	sigAlg, hashAlg := key.public.Scheme.Scheme, key.public.Scheme.HashAlg
+	if sigAlg == AlgNull {
+		sigAlg, hashAlg = scheme, schemeHash
+	}
+	sig, errResp := t.signWith(key, sigAlg, hashAlg, digest)
+	if errResp != nil {
+		return errResp
+	}
+	return t.authResponse(ac, nil, sig)
+}
+
+// cmdVerifySignature implements TPM2_VerifySignature (no authorization).
+func (t *TPM) cmdVerifySignature(r *reader) []byte {
+	keyHandle := r.u32()
+	digest := r.tpm2b()
+	sigAlg := r.u16()
+	hashAlg := r.u16()
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	key, ok := t.objects.get(keyHandle)
+	if !ok {
+		return errorResponse(withHandle(RCHandle, 1))
+	}
+	ch, hashOK := cryptoHash(hashAlg)
+	valid := false
+	switch key.public.Type {
+	case AlgRSA:
+		sig := r.tpm2b()
+		if r.err != nil || !hashOK {
+			return errorResponse(RCInsufficient)
+		}
+		pub := &rsa.PublicKey{N: new(big.Int).SetBytes(key.public.Unique), E: rsaExp(key.public.Exp)}
+		switch sigAlg {
+		case AlgRSAPSS:
+			valid = rsa.VerifyPSS(pub, ch, digest, sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: ch}) == nil
+		default:
+			valid = rsa.VerifyPKCS1v15(pub, ch, digest, sig) == nil
+		}
+	case AlgECC:
+		rb := r.tpm2b()
+		sb := r.tpm2b()
+		if r.err != nil {
+			return errorResponse(RCInsufficient)
+		}
+		curve := curveFor(key.public.Curve)
+		if curve == nil {
+			return errorResponse(withParam(RCValue, 1))
+		}
+		pub := &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(key.public.UniqueX), Y: new(big.Int).SetBytes(key.public.UniqueY)}
+		valid = ecdsa.Verify(pub, digest, new(big.Int).SetBytes(rb), new(big.Int).SetBytes(sb))
+	default:
+		return errorResponse(withHandle(RCType, 1))
+	}
+	if !valid {
+		return errorResponse(RCSignature)
+	}
+	// TPMT_TK_VERIFIED.
+	var w writer
+	w.u16(STVerified)
+	w.u32(RHNull)
+	w.tpm2b(hmacSum(AlgSHA256, t.contextKey, be16(STVerified), digest))
+	return successResponse(w.bytes(), 0)
+}
+
+// cmdHash implements TPM2_Hash (no authorization).
+func (t *TPM) cmdHash(r *reader) []byte {
+	data := r.tpm2b()
+	hashAlg := r.u16()
+	_ = r.u32() // hierarchy
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	if _, ok := cryptoHash(hashAlg); !ok {
+		return errorResponse(withParam(RCValue, 2))
+	}
+	var w writer
+	w.tpm2b(hashSum(hashAlg, data)) // outHash
+	w.u16(STHashCheck)              // validation (TPMT_TK_HASHCHECK)
+	w.u32(RHNull)
+	w.tpm2b(nil)
+	return successResponse(w.bytes(), 0)
+}
+
+// rsaExp returns the effective RSA public exponent (0 means the default).
+func rsaExp(e uint32) int {
+	if e == 0 {
+		return rsaExponent
+	}
+	return int(e)
+}
