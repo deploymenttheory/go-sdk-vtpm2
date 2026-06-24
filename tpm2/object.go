@@ -67,6 +67,16 @@ func derivePrimary(primarySeed []byte, tmpl public, userAuth []byte) (*object, [
 		_, _ = r.Read(sens.Secret)
 		// unique = H_nameAlg(seedValue ‖ secret), per the keyed-hash object rules.
 		pub.Unique = hashSum(tmpl.NameAlg, sens.SeedValue, sens.Secret)
+	case AlgSymCipher:
+		if tmpl.Sym.Alg != AlgAES || tmpl.Sym.KeyBits%8 != 0 {
+			return nil, errorResponse(withParam(RCValue, 2))
+		}
+		sens.SeedValue = make([]byte, hashSize(tmpl.NameAlg))
+		_, _ = r.Read(sens.SeedValue)
+		sens.Secret = make([]byte, int(tmpl.Sym.KeyBits)/8)
+		_, _ = r.Read(sens.Secret)
+		// unique = H_nameAlg(seedValue ‖ key), as for any symmetric object.
+		pub.Unique = hashSum(tmpl.NameAlg, sens.SeedValue, sens.Secret)
 	default:
 		return nil, errorResponse(withParam(RCType, 2))
 	}
@@ -268,6 +278,20 @@ func createChild(tmpl public, userAuth, data []byte, rng io.Reader) (*object, []
 			sens.Secret = append([]byte(nil), data...) // user data to seal
 		}
 		pub.Unique = hashSum(tmpl.NameAlg, sens.SeedValue, sens.Secret)
+	case AlgSymCipher:
+		if tmpl.Sym.Alg != AlgAES || tmpl.Sym.KeyBits%8 != 0 {
+			return nil, errorResponse(withParam(RCValue, 2))
+		}
+		sens.SeedValue = randBytes(rng, hashSize(tmpl.NameAlg))
+		if tmpl.Attrs&ObjSensitiveDataOrigin != 0 {
+			sens.Secret = randBytes(rng, int(tmpl.Sym.KeyBits)/8) // generated key
+		} else {
+			if len(data) == 0 {
+				return nil, errorResponse(withParam(RCValue, 1)) // imported key required
+			}
+			sens.Secret = append([]byte(nil), data...)
+		}
+		pub.Unique = hashSum(tmpl.NameAlg, sens.SeedValue, sens.Secret)
 	default:
 		return nil, errorResponse(withParam(RCType, 2))
 	}
@@ -325,6 +349,72 @@ func (t *TPM) cmdCreate(tag uint16, r *reader) []byte {
 	w.tpm2b(creationHash)      // creationHash
 	w.raw(ticket)              // creationTicket
 	return t.authResponse(ac, nil, w.bytes())
+}
+
+// cmdCreateLoaded implements TPM2_CreateLoaded (Part 3, §12.9): create an object
+// and load it in one command. A hierarchy parent yields a primary key; a storage
+// key parent yields an ordinary child whose sensitive is wrapped into outPrivate.
+func (t *TPM) cmdCreateLoaded(tag uint16, r *reader) []byte {
+	ac, errResp := parseCommandAuth(tag, CCCreateLoaded, 1, r) // @parentHandle
+	if errResp != nil {
+		return errResp
+	}
+	t.decryptCommandParams(ac, r)
+	_ = r.u16() // inSensitive (TPM2B_SENSITIVE_CREATE) outer size
+	userAuth := r.tpm2b()
+	data := r.tpm2b()
+	tmpl := readPublic2B(r) // inPublic (TPM2B_TEMPLATE)
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	if _, ok := cryptoHash(tmpl.NameAlg); !ok {
+		return errorResponse(withParam(RCValue, 2))
+	}
+	parentHandle := ac.handles[0]
+
+	var o *object
+	var outPrivate []byte
+	if hi := t.h.byHandle(parentHandle); hi != nil {
+		// Primary key derived from the hierarchy seed.
+		if errResp := t.authorizeHierarchy(ac, parentHandle); errResp != nil {
+			return errResp
+		}
+		var derr []byte
+		if o, derr = derivePrimary(hi.seed, tmpl, userAuth); derr != nil {
+			return derr
+		}
+		o.qualifiedName = qualifiedNameOf(tmpl.NameAlg, permanentName(parentHandle), o.name)
+	} else {
+		parent, ok := t.objects.get(parentHandle)
+		if !ok {
+			return errorResponse(withHandle(RCHandle, 1))
+		}
+		if !isStorageKey(parent.public.Attrs) {
+			return errorResponse(withHandle(RCType, 1))
+		}
+		if errResp := t.authorizeObject(ac, 0, parent); errResp != nil {
+			return errResp
+		}
+		var derr []byte
+		if o, derr = createChild(tmpl, userAuth, data, t.rand); derr != nil {
+			return derr
+		}
+		outPrivate = wrapSensitive(parent, &o.sensitive, o.name, t.rand)
+		o.qualifiedName = qualifiedNameOf(tmpl.NameAlg, parent.qualifiedName, o.name)
+	}
+	handle, ok := t.objects.loadTransient(o)
+	if !ok {
+		return errorResponse(RCObjectMemory)
+	}
+
+	if outPrivate == nil {
+		outPrivate = []byte{0, 0} // empty TPM2B_PRIVATE for a primary key
+	}
+	var w writer
+	w.raw(outPrivate)      // outPrivate (TPM2B_PRIVATE)
+	o.public.marshal2B(&w) // outPublic (TPM2B_PUBLIC)
+	w.tpm2b(o.name)        // name
+	return t.authResponse(ac, []uint32{handle}, w.bytes())
 }
 
 // cmdLoad implements TPM2_Load: unwrap a TPM2B_PRIVATE under its parent and load

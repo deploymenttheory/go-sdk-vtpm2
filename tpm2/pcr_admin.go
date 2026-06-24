@@ -3,8 +3,67 @@
 
 package tpm2
 
-// This file adds the structural PCR/NV commands of Phase 6b: TPM2_PCR_Allocate,
-// TPM2_PCR_SetAuthValue, TPM2_PCR_SetAuthPolicy and TPM2_NV_UndefineSpaceSpecial.
+import "sort"
+
+// This file implements the PCR administration commands (TPM 2.0 Part 3, §22):
+// TPM2_PCR_Event, TPM2_PCR_Allocate, TPM2_PCR_SetAuthValue and
+// TPM2_PCR_SetAuthPolicy. The PCR banks themselves live in pcrState (pcr.go).
+
+// sortedAlgs returns the configured PCR bank algorithms ascending, so
+// TPML_DIGEST_VALUES output (TPM2_PCR_Event) is deterministic.
+func (s *pcrState) sortedAlgs() []uint16 {
+	algs := make([]uint16, 0, len(s.banks))
+	for alg := range s.banks {
+		algs = append(algs, alg)
+	}
+	sort.Slice(algs, func(i, j int) bool { return algs[i] < algs[j] })
+	return algs
+}
+
+// cmdPCREvent implements TPM2_PCR_Event (Part 3, §22.2): hash eventData in every
+// bank, extend the PCR (unless pcrHandle is TPM_RH_NULL) and return the per-bank
+// digests as a TPML_DIGEST_VALUES.
+func (t *TPM) cmdPCREvent(tag uint16, r *reader) []byte {
+	if tag != TPMSTSessions {
+		return errorResponse(RCAuthMissing)
+	}
+	pcrHandle := r.u32()
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	sessions, ok := readAuthArea(r)
+	if !ok {
+		return errorResponse(RCAuthSize)
+	}
+	eventData := r.tpm2b()
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+
+	extend := pcrHandle != RHNull
+	index := int(pcrHandle)
+	if extend {
+		if index < 0 || index >= numPCR {
+			return errorResponse(withHandle(RCValue, 1))
+		}
+		if !localityAllowed(pcrExtendLocalities(index), t.locality) {
+			return errorResponse(RCLocality)
+		}
+	}
+
+	var w writer
+	algs := t.pcr.sortedAlgs()
+	w.u32(uint32(len(algs))) // TPML_DIGEST_VALUES count
+	for _, alg := range algs {
+		d := hashSum(alg, eventData)
+		if extend {
+			t.pcr.extend(alg, index, d)
+		}
+		w.u16(alg) // TPMT_HA.hashAlg
+		w.raw(d)   // TPMT_HA.digest (raw, hashSize bytes)
+	}
+	return successResponse(w.bytes(), len(sessions))
+}
 
 // cmdPCRAllocate implements TPM2_PCR_Allocate (Part 3, §22.4): change the set of
 // PCR banks. The spec applies the new allocation at the next _TPM_Init; this
@@ -116,34 +175,5 @@ func (t *TPM) cmdPCRSetAuthPolicy(tag uint16, r *reader) []byte {
 		t.pcr.authPolicies = make(map[uint32][]byte)
 	}
 	t.pcr.authPolicies[pcrNum] = append([]byte(nil), authPolicy...)
-	return t.authResponse(ac, nil, nil)
-}
-
-// cmdNVUndefineSpaceSpecial implements TPM2_NV_UndefineSpaceSpecial (Part 3,
-// §31.6): delete an Index with the POLICY_DELETE attribute. Handles: nvIndex
-// (ADMIN-role policy auth), platform (USER auth).
-func (t *TPM) cmdNVUndefineSpaceSpecial(tag uint16, r *reader) []byte {
-	ac, errResp := parseCommandAuth(tag, CCNVUndefineSpaceSpecial, 2, r) // nvIndex, platform
-	if errResp != nil {
-		return errResp
-	}
-	idx, ok := t.nv.get(ac.handles[0])
-	if !ok {
-		return errorResponse(withHandle(RCHandle, 1))
-	}
-	if idx.public.Attrs&NVPolicyDelete == 0 {
-		return errorResponse(withHandle(RCAttributes, 1)) // only POLICY_DELETE Indices
-	}
-	// nvIndex is authorized at ADMIN role by its own policy.
-	if errResp := t.verifyAuth(ac, 0, idx.name, idx.authValue, idx.public.AuthPolicy, false); errResp != nil {
-		return errResp
-	}
-	if ac.handles[1] != RHPlatform {
-		return errorResponse(withHandle(RCValue, 2))
-	}
-	if errResp := t.authorizeHierarchyAt(ac, 1, RHPlatform); errResp != nil {
-		return errResp
-	}
-	delete(t.nv.indices, ac.handles[0])
 	return t.authResponse(ac, nil, nil)
 }

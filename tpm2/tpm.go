@@ -36,6 +36,17 @@ type TPM struct {
 	// session that currently holds exclusive audit status (0 if none).
 	audit          auditState
 	exclusiveAudit uint32
+
+	// EC commit subsystem (TPM 2.0 Part 1, §C.2): commitCount is the running
+	// counter returned by TPM2_Commit/TPM2_EC_Ephemeral; committed maps a counter's
+	// low 16 bits to the ephemeral private scalar so TPM2_ZGen_2Phase can recover it.
+	commitCount uint64
+	committed   map[uint16]*ecCommit
+
+	// Management state: the vendor algorithm set (TPM2_SetAlgorithmSet) and the set
+	// of commands requiring physical presence (TPM2_PP_Commands).
+	algorithmSet uint32
+	ppRequired   map[uint32]bool
 	// contextKey protects saved contexts (TPM2_ContextSave); it is volatile and
 	// regenerated on reset, so saved contexts do not survive a reboot.
 	contextKey []byte
@@ -304,6 +315,26 @@ func (t *TPM) Execute(cmd []byte) []byte {
 		return t.cmdPCRSetAuthPolicy(tag, r)
 	case CCNVUndefineSpaceSpecial:
 		return t.cmdNVUndefineSpaceSpecial(tag, r)
+	case CCCommit:
+		return t.cmdCommit(tag, r)
+	case CCECEphemeral:
+		return t.cmdECEphemeral(tag, r)
+	case CCZGen2Phase:
+		return t.cmdZGen2Phase(tag, r)
+	case CCIncrementalSelfTest:
+		return t.cmdIncrementalSelfTest(r)
+	case CCTestParms:
+		return t.cmdTestParms(r)
+	case CCSetAlgorithmSet:
+		return t.cmdSetAlgorithmSet(tag, r)
+	case CCPPCommands:
+		return t.cmdPPCommands(tag, r)
+	case CCEncryptDecrypt:
+		return t.cmdEncryptDecrypt(tag, r)
+	case CCEncryptDecrypt2:
+		return t.cmdEncryptDecrypt2(tag, r)
+	case CCCreateLoaded:
+		return t.cmdCreateLoaded(tag, r)
 	default:
 		return errorResponse(RCCommandCode)
 	}
@@ -326,6 +357,7 @@ func (t *TPM) Init(deleteVolatile bool) {
 	t.sequences.reset()            // hash/HMAC sequences are volatile
 	t.contextKey = randomSeed()    // invalidate any previously saved contexts
 	t.exclusiveAudit = 0           // exclusive audit status is tied to volatile sessions
+	t.committed = nil              // committed ephemeral scalars are volatile
 	if t.audit.hashAlg == AlgNull {
 		t.audit.hashAlg = AlgSHA256 // default command-audit algorithm
 	}

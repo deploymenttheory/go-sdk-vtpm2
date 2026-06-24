@@ -76,6 +76,7 @@ var commandTable = []struct {
 	{CCNVDefineSpace, 1},
 	{CCPCRAllocate, 1},      // 0x12B
 	{CCPCRSetAuthPolicy, 1}, // 0x12C
+	{CCPPCommands, 1},       // 0x12D
 	{CCSetPrimaryPolicy, 1},
 	{CCClockRateAdjust, 1}, // 0x130
 	{CCCreatePrimary, 1},
@@ -92,7 +93,9 @@ var commandTable = []struct {
 	{CCPCREvent, 1},     // 0x13C
 	{CCPCRReset, 1},
 	{CCSequenceComplete, 1},          // 0x13E
+	{CCSetAlgorithmSet, 1},           // 0x13F
 	{CCSetCommandCodeAuditStatus, 1}, // 0x140
+	{CCIncrementalSelfTest, 0},       // 0x142
 	{CCSelfTest, 0},
 	{CCStartup, 0},
 	{CCShutdown, 0},
@@ -120,11 +123,12 @@ var commandTable = []struct {
 	{CCSequenceUpdate, 1}, // 0x15C
 	{CCSign, 1},
 	{CCUnseal, 1},
-	{CCPolicySigned, 2}, // 0x160 (authObject, policySession)
-	{CCContextLoad, 0},  // context is a parameter
-	{CCContextSave, 1},  // saveHandle
-	{CCECDHKeyGen, 1},   // 0x163
-	{CCFlushContext, 0}, // flushHandle is a parameter, not a command handle
+	{CCPolicySigned, 2},   // 0x160 (authObject, policySession)
+	{CCContextLoad, 0},    // context is a parameter
+	{CCContextSave, 1},    // saveHandle
+	{CCECDHKeyGen, 1},     // 0x163
+	{CCEncryptDecrypt, 1}, // 0x164 (keyHandle)
+	{CCFlushContext, 0},   // flushHandle is a parameter, not a command handle
 	{CCLoadExternal, 0},
 	{CCMakeCredential, 1}, // 0x168
 	{CCNVReadPublic, 1},
@@ -158,10 +162,16 @@ var commandTable = []struct {
 	{CCPolicyPhysicalPresence, 1},  // 0x187
 	{CCPolicyDuplicationSelect, 1}, // 0x188
 	{CCPolicyGetDigest, 1},
+	{CCTestParms, 0},         // 0x18A
+	{CCCommit, 1},            // 0x18B (signHandle)
 	{CCPolicyPassword, 1},    // 0x18C
+	{CCZGen2Phase, 1},        // 0x18D (keyA)
+	{CCECEphemeral, 0},       // 0x18E (no handle)
 	{CCPolicyNvWritten, 1},   // 0x18F
 	{CCPolicyTemplate, 1},    // 0x190
+	{CCCreateLoaded, 1},      // 0x191 (parentHandle)
 	{CCPolicyAuthorizeNV, 3}, // 0x192 (authHandle, nvIndex, policySession)
+	{CCEncryptDecrypt2, 1},   // 0x193 (keyHandle)
 	{CCCertifyX509, 2},       // 0x197 (objectHandle, signHandle)
 	{CCPolicyCapability, 1},  // 0x19B
 	{CCPolicyParameters, 1},  // 0x19C

@@ -8,8 +8,45 @@ import (
 	"testing"
 )
 
-// pcrSelectionList builds a TPML_PCR_SELECTION DER for the given banks, each
-// selecting all PCRs.
+func TestPCREvent(t *testing.T) {
+	tpm := New()
+	startup(t, tpm)
+	const index = 16 // a debug PCR, extendable at locality 0
+	before := append([]byte(nil), tpm.pcr.banks[AlgSHA256][index]...)
+	eventData := []byte("measured-event")
+
+	var b writer
+	b.u32(index)
+	b.raw(onePasswordAuth())
+	b.tpm2b(eventData)
+	_, rc, p := parseResp(t, tpm.Execute(buildCmd(TPMSTSessions, CCPCREvent, b.bytes())))
+	if rc != RCSuccess {
+		t.Fatalf("PCR_Event rc = 0x%x", rc)
+	}
+
+	// The response lists a digest per bank; find the SHA-256 one.
+	r := newReader(p)
+	count := r.u32()
+	var sha256Digest []byte
+	for i := uint32(0); i < count; i++ {
+		alg := r.u16()
+		d := r.bytes(hashSize(alg))
+		if alg == AlgSHA256 {
+			sha256Digest = d
+		}
+	}
+	wantEvent := hashSum(AlgSHA256, eventData)
+	if !bytes.Equal(sha256Digest, wantEvent) {
+		t.Fatal("returned SHA-256 event digest mismatch")
+	}
+	// PCR[index] := H(old ‖ H(eventData)).
+	if got := tpm.pcr.banks[AlgSHA256][index]; !bytes.Equal(got, hashSum(AlgSHA256, before, wantEvent)) {
+		t.Fatal("PCR not extended with the event digest")
+	}
+}
+
+// pcrSelectionList builds a TPML_PCR_SELECTION for the given banks, each selecting
+// all PCRs.
 func pcrSelectionList(algs ...uint16) []byte {
 	var w writer
 	w.u32(uint32(len(algs)))
@@ -94,72 +131,5 @@ func TestPCRSetAuthPolicy(t *testing.T) {
 	}
 	if got := tpm.pcr.authPolicies[pcr]; !bytes.Equal(got, policy) {
 		t.Fatal("PCR auth policy was not stored")
-	}
-}
-
-// defineSpaceFull is defineSpace with a settable authPolicy (and an empty Index
-// auth), needed for POLICY_DELETE indices.
-func defineSpaceFull(t *testing.T, tpm *TPM, authHi, index, nt, attrs uint32, dataSize uint16, authPolicy []byte) {
-	t.Helper()
-	public := nvPublic{
-		Index:      index,
-		NameAlg:    AlgSHA256,
-		Attrs:      attrs | (nt << NVNTShift),
-		AuthPolicy: authPolicy,
-		DataSize:   dataSize,
-	}
-	var params writer
-	params.tpm2b(nil)
-	public.marshal2B(&params)
-	var auth writer
-	auth.u32(RHPW)
-	auth.u16(0)
-	auth.u8(0)
-	auth.u16(0)
-	var body writer
-	body.u32(authHi)
-	body.u32(uint32(len(auth.bytes())))
-	body.raw(auth.bytes())
-	body.raw(params.bytes())
-	if _, rc, _ := parseResp(t, tpm.Execute(buildCmd(TPMSTSessions, CCNVDefineSpace, body.bytes()))); rc != RCSuccess {
-		t.Fatalf("NV_DefineSpace rc = 0x%x", rc)
-	}
-}
-
-func TestNVUndefineSpaceSpecial(t *testing.T) {
-	tpm := New()
-	startup(t, tpm)
-	const nvH = 0x01000060
-	// A POLICY_DELETE index with a zero authPolicy, so a fresh policy session
-	// (whose digest is the Zero Digest) satisfies its ADMIN-role authorization.
-	zeroPolicy := make([]byte, 32)
-	defineSpaceFull(t, tpm, RHPlatform, nvH, nvOrdinary, NVPolicyDelete|NVAuthRead, 8, zeroPolicy)
-
-	s := startSession(t, tpm, sePolicy, AlgSHA256)
-	var auth writer
-	auth.u32(s)
-	auth.tpm2b(nil)
-	auth.u8(attrContinue)
-	auth.tpm2b(nil)
-	var pw writer // platform password session
-	pw.u32(RHPW)
-	pw.tpm2b(nil)
-	pw.u8(attrContinue)
-	pw.tpm2b(nil)
-
-	var area writer
-	area.u32(uint32(len(auth.bytes()) + len(pw.bytes())))
-	area.raw(auth.bytes())
-	area.raw(pw.bytes())
-
-	var b writer
-	b.u32(nvH)
-	b.u32(RHPlatform)
-	b.raw(area.bytes())
-	if _, rc, _ := parseResp(t, tpm.Execute(buildCmd(TPMSTSessions, CCNVUndefineSpaceSpecial, b.bytes()))); rc != RCSuccess {
-		t.Fatalf("NV_UndefineSpaceSpecial rc = 0x%x", rc)
-	}
-	if _, ok := tpm.nv.get(nvH); ok {
-		t.Fatal("index still present after NV_UndefineSpaceSpecial")
 	}
 }

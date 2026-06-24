@@ -109,6 +109,22 @@ const (
 	CCECDHZGen      uint32 = 0x00000154 // TPM2_ECDH_ZGen
 	CCECCParameters uint32 = 0x00000178 // TPM2_ECC_Parameters
 
+	// EC commit / ECDAA / two-phase ECDH (Phase 7).
+	CCCommit      uint32 = 0x0000018B // TPM2_Commit
+	CCZGen2Phase  uint32 = 0x0000018D // TPM2_ZGen_2Phase
+	CCECEphemeral uint32 = 0x0000018E // TPM2_EC_Ephemeral
+
+	// Symmetric cipher + object lifecycle (Phase 9).
+	CCEncryptDecrypt  uint32 = 0x00000164 // TPM2_EncryptDecrypt
+	CCEncryptDecrypt2 uint32 = 0x00000193 // TPM2_EncryptDecrypt2
+	CCCreateLoaded    uint32 = 0x00000191 // TPM2_CreateLoaded
+
+	// Management / test (Phase 8).
+	CCPPCommands          uint32 = 0x0000012D // TPM2_PP_Commands
+	CCSetAlgorithmSet     uint32 = 0x0000013F // TPM2_SetAlgorithmSet
+	CCIncrementalSelfTest uint32 = 0x00000142 // TPM2_IncrementalSelfTest
+	CCTestParms           uint32 = 0x0000018A // TPM2_TestParms
+
 	// Hash/HMAC sequences (Phase 2). TPM_CC_HMAC/TPM_CC_MAC and HMAC_Start/MAC_Start
 	// share a code; the same handlers serve both names.
 	CCHMACStart             uint32 = 0x0000015B // TPM2_HMAC_Start (= TPM2_MAC_Start)
@@ -245,6 +261,8 @@ const (
 	RCBadAuth      uint32 = rcFmt1 + 0x022 // TPM_RC_BAD_AUTH (0x0A2)
 	RCTicket       uint32 = rcFmt1 + 0x020 // TPM_RC_TICKET (0x0A0)
 	RCECCPoint     uint32 = rcFmt1 + 0x027 // TPM_RC_ECC_POINT (0x0A7)
+	RCNoResult     uint32 = rcFmt1 + 0x01F // TPM_RC_NO_RESULT (0x09F)
+	RCCurve        uint32 = rcFmt1 + 0x026 // TPM_RC_CURVE (0x0A6)
 	RCPolicyCC     uint32 = rcFmt1 + 0x024 // TPM_RC_POLICY_CC (0x0A4)
 	RCSignature    uint32 = rcFmt1 + 0x01B // TPM_RC_SIGNATURE (0x09B)
 	RCKey          uint32 = rcFmt1 + 0x01C // TPM_RC_KEY (0x09C)
