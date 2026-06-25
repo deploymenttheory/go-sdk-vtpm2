@@ -43,10 +43,14 @@ type TPM struct {
 	commitCount uint64
 	committed   map[uint16]*ecCommit
 
-	// Management state: the vendor algorithm set (TPM2_SetAlgorithmSet) and the set
-	// of commands requiring physical presence (TPM2_PP_Commands).
+	// Management state: the vendor algorithm set (TPM2_SetAlgorithmSet), the set of
+	// commands requiring physical presence (TPM2_PP_Commands), the Authenticated
+	// Countdown Timers (TPM2_ACT_SetTimeout) and the NV read-only flag
+	// (TPM2_ReadOnlyControl).
 	algorithmSet uint32
 	ppRequired   map[uint32]bool
+	actTimers    map[uint32]*actTimer
+	readOnly     bool
 	// contextKey protects saved contexts (TPM2_ContextSave); it is volatile and
 	// regenerated on reset, so saved contexts do not survive a reboot.
 	contextKey []byte
@@ -271,6 +275,8 @@ func (t *TPM) Execute(cmd []byte) []byte {
 		return t.cmdPolicyCapability(r)
 	case CCPolicyParameters:
 		return t.cmdPolicyParameters(r)
+	case CCPolicyTransportSPDM:
+		return t.cmdPolicyTransportSPDM(r)
 	case CCMakeCredential:
 		return t.cmdMakeCredential(r)
 	case CCActivateCredential:
@@ -335,6 +341,30 @@ func (t *TPM) Execute(cmd []byte) []byte {
 		return t.cmdEncryptDecrypt2(tag, r)
 	case CCCreateLoaded:
 		return t.cmdCreateLoaded(tag, r)
+	case CCECCEncrypt:
+		return t.cmdECCEncrypt(r)
+	case CCECCDecrypt:
+		return t.cmdECCDecrypt(tag, r)
+	case CCACTSetTimeout:
+		return t.cmdACTSetTimeout(tag, r)
+	case CCReadOnlyControl:
+		return t.cmdReadOnlyControl(tag, r)
+	case CCSignDigest:
+		return t.cmdSignDigest(tag, r)
+	case CCVerifyDigestSignature:
+		return t.cmdVerifyDigestSignature(r)
+	case CCSignSequenceStart:
+		return t.cmdSignSequenceStart(r)
+	case CCSignSequenceComplete:
+		return t.cmdSignSequenceComplete(tag, r)
+	case CCVerifySequenceStart:
+		return t.cmdVerifySequenceStart(r)
+	case CCVerifySequenceComplete:
+		return t.cmdVerifySequenceComplete(tag, r)
+	case CCEncapsulate:
+		return t.cmdEncapsulate(r)
+	case CCDecapsulate:
+		return t.cmdDecapsulate(tag, r)
 	default:
 		return errorResponse(RCCommandCode)
 	}

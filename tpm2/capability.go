@@ -162,19 +162,32 @@ var commandTable = []struct {
 	{CCPolicyPhysicalPresence, 1},  // 0x187
 	{CCPolicyDuplicationSelect, 1}, // 0x188
 	{CCPolicyGetDigest, 1},
-	{CCTestParms, 0},         // 0x18A
-	{CCCommit, 1},            // 0x18B (signHandle)
-	{CCPolicyPassword, 1},    // 0x18C
-	{CCZGen2Phase, 1},        // 0x18D (keyA)
-	{CCECEphemeral, 0},       // 0x18E (no handle)
-	{CCPolicyNvWritten, 1},   // 0x18F
-	{CCPolicyTemplate, 1},    // 0x190
-	{CCCreateLoaded, 1},      // 0x191 (parentHandle)
-	{CCPolicyAuthorizeNV, 3}, // 0x192 (authHandle, nvIndex, policySession)
-	{CCEncryptDecrypt2, 1},   // 0x193 (keyHandle)
-	{CCCertifyX509, 2},       // 0x197 (objectHandle, signHandle)
-	{CCPolicyCapability, 1},  // 0x19B
-	{CCPolicyParameters, 1},  // 0x19C
+	{CCTestParms, 0},              // 0x18A
+	{CCCommit, 1},                 // 0x18B (signHandle)
+	{CCPolicyPassword, 1},         // 0x18C
+	{CCZGen2Phase, 1},             // 0x18D (keyA)
+	{CCECEphemeral, 0},            // 0x18E (no handle)
+	{CCPolicyNvWritten, 1},        // 0x18F
+	{CCPolicyTemplate, 1},         // 0x190
+	{CCCreateLoaded, 1},           // 0x191 (parentHandle)
+	{CCPolicyAuthorizeNV, 3},      // 0x192 (authHandle, nvIndex, policySession)
+	{CCEncryptDecrypt2, 1},        // 0x193 (keyHandle)
+	{CCCertifyX509, 2},            // 0x197 (objectHandle, signHandle)
+	{CCACTSetTimeout, 1},          // 0x198 (actHandle)
+	{CCECCEncrypt, 1},             // 0x199 (keyHandle)
+	{CCECCDecrypt, 1},             // 0x19A (keyHandle)
+	{CCPolicyCapability, 1},       // 0x19B
+	{CCPolicyParameters, 1},       // 0x19C
+	{CCReadOnlyControl, 1},        // 0x1A0 (platform)
+	{CCPolicyTransportSPDM, 1},    // 0x1A1 (policySession)
+	{CCVerifySequenceComplete, 2}, // 0x1A3 (sequenceHandle, keyHandle)
+	{CCSignSequenceComplete, 2},   // 0x1A4 (sequenceHandle, keyHandle)
+	{CCVerifyDigestSignature, 1},  // 0x1A5 (keyHandle)
+	{CCSignDigest, 1},             // 0x1A6 (keyHandle)
+	{CCEncapsulate, 1},            // 0x1A7 (keyHandle)
+	{CCDecapsulate, 1},            // 0x1A8 (keyHandle)
+	{CCVerifySequenceStart, 1},    // 0x1A9 (keyHandle)
+	{CCSignSequenceStart, 1},      // 0x1AA (keyHandle)
 }
 
 // cmdGetCapability implements TPM2_GetCapability for the capabilities the
