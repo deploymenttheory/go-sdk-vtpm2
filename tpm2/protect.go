@@ -151,3 +151,37 @@ func unwrapWithSeed(nameAlg uint16, seed, blob, name []byte, keyBits uint16) ([]
 	symKey := kdfa(nameAlg, seed, []byte("STORAGE"), name, nil, int(keyBits))
 	return aesCFB(symKey, symIv, enc, false), true
 }
+
+// wrapDuplication produces the duplication outer-wrap content (integrity ‖
+// dupSensitive) for a marshalled sensitive area bound to name. Unlike object
+// storage it uses a ZERO IV and stores no symIv, and the outer HMAC covers only
+// dupSensitive ‖ name (TPM 2.0 Part 1, §23.7, equations 41 and 43).
+func wrapDuplication(nameAlg uint16, seed, sensitive2B, name []byte, keyBits uint16) []byte {
+	symKey := kdfa(nameAlg, seed, []byte("STORAGE"), name, nil, int(keyBits))
+	enc := aesCFB(symKey, make([]byte, aes.BlockSize), sensitive2B, true) // IV = 0 (eq 41)
+
+	integrityKey := kdfa(nameAlg, seed, []byte("INTEGRITY"), nil, nil, hashSize(nameAlg)*8)
+	integrity := hmacSum(nameAlg, integrityKey, enc, name) // HMAC(dupSensitive ‖ name) (eq 43)
+
+	var inner writer
+	inner.tpm2b(integrity)
+	inner.raw(enc)
+	return inner.bytes()
+}
+
+// unwrapDuplication reverses wrapDuplication, returning the marshalled
+// TPM2B_SENSITIVE bytes.
+func unwrapDuplication(nameAlg uint16, seed, blob, name []byte, keyBits uint16) ([]byte, bool) {
+	r := newReader(blob)
+	integrity := r.tpm2b()
+	enc := r.bytes(r.remaining())
+	if r.err != nil {
+		return nil, false
+	}
+	integrityKey := kdfa(nameAlg, seed, []byte("INTEGRITY"), nil, nil, hashSize(nameAlg)*8)
+	if !hmac.Equal(hmacSum(nameAlg, integrityKey, enc, name), integrity) {
+		return nil, false
+	}
+	symKey := kdfa(nameAlg, seed, []byte("STORAGE"), name, nil, int(keyBits))
+	return aesCFB(symKey, make([]byte, aes.BlockSize), enc, false), true
+}

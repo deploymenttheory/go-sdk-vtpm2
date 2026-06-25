@@ -34,6 +34,8 @@ type authSession struct {
 	policyLocality byte   // PolicyLocality bitmap (localities 0..4)
 
 	auditDigest []byte // running session-audit digest (nil until first audited command)
+
+	spdmTransport bool // PolicyTransportSPDM was invoked (one-shot)
 }
 
 // sessionTable holds the live sessions, keyed by handle (in the 0x02xxxxxx range).

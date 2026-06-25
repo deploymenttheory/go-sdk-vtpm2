@@ -170,6 +170,82 @@ func (t *TPM) cmdVerifySignature(r *reader) []byte {
 	return successResponse(w.bytes(), 0)
 }
 
+// cmdSignDigest implements TPM2_SignDigest (Part 3, §20.6): sign a digest using the
+// key's own scheme. Like TPM2_Sign but carrying a TPM2B_SIGNATURE_CTX (used only by
+// context-bearing schemes such as ML-DSA, ignored for RSA/ECDSA) and no inScheme.
+func (t *TPM) cmdSignDigest(tag uint16, r *reader) []byte {
+	ac, errResp := parseCommandAuth(tag, CCSignDigest, 1, r) // keyHandle
+	if errResp != nil {
+		return errResp
+	}
+	_ = r.tpm2b() // context (TPM2B_SIGNATURE_CTX)
+	digest := r.tpm2b()
+	_ = r.u16()           // validation (TPMT_TK_HASHCHECK): tag
+	tkHier := r.u32()     // ticket hierarchy
+	tkDigest := r.tpm2b() // ticket digest
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	key, ok := t.objects.get(ac.handles[0])
+	if !ok {
+		return errorResponse(withHandle(RCHandle, 1))
+	}
+	if key.public.Attrs&ObjSign == 0 {
+		return errorResponse(withHandle(RCAttributes, 1))
+	}
+	// A restricted signing key may only sign a TPM-produced digest (valid hashcheck).
+	if key.public.Attrs&ObjRestricted != 0 {
+		proof := t.hierarchyProof(tkHier)
+		want := hmacSum(AlgSHA256, proof, be16(STHashCheck), digest)
+		if tkHier == RHNull || proof == nil || !hmac.Equal(tkDigest, want) {
+			return errorResponse(RCTicket)
+		}
+	}
+	if errResp := t.authorizeObject(ac, 0, key); errResp != nil {
+		return errResp
+	}
+	sigAlg, hashAlg := key.public.Scheme.Scheme, key.public.Scheme.HashAlg
+	if sigAlg == AlgNull {
+		return errorResponse(RCScheme) // SignDigest carries no inScheme; the key must define one
+	}
+	sig, errResp := t.signWith(key, sigAlg, hashAlg, digest)
+	if errResp != nil {
+		return errResp
+	}
+	return t.authResponse(ac, nil, sig)
+}
+
+// cmdVerifyDigestSignature implements TPM2_VerifyDigestSignature (Part 3, §20.5):
+// like TPM2_VerifySignature but with a TPM2B_SIGNATURE_CTX. No authorization.
+func (t *TPM) cmdVerifyDigestSignature(r *reader) []byte {
+	keyHandle := r.u32()
+	_ = r.tpm2b() // context (TPM2B_SIGNATURE_CTX)
+	digest := r.tpm2b()
+	sigAlg := r.u16()
+	hashAlg := r.u16()
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	key, ok := t.objects.get(keyHandle)
+	if !ok {
+		return errorResponse(withHandle(RCHandle, 1))
+	}
+	if key.public.Type != AlgRSA && key.public.Type != AlgECC {
+		return errorResponse(withHandle(RCType, 1))
+	}
+	if !verifySignature(key, sigAlg, hashAlg, digest, r) {
+		if r.err != nil {
+			return errorResponse(RCInsufficient)
+		}
+		return errorResponse(RCSignature)
+	}
+	var w writer
+	w.u16(STVerified)
+	w.u32(RHNull)
+	w.tpm2b(hmacSum(AlgSHA256, t.hierarchyProof(RHNull), be16(STVerified), digest))
+	return successResponse(w.bytes(), 0)
+}
+
 // cmdHash implements TPM2_Hash (no authorization).
 func (t *TPM) cmdHash(r *reader) []byte {
 	data := r.tpm2b()

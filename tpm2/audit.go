@@ -129,20 +129,26 @@ func (t *TPM) cmdSetCommandCodeAuditStatus(tag uint16, r *reader) []byte {
 	if errResp := t.authorizeHierarchy(ac, authHandle); errResp != nil {
 		return errResp
 	}
-	if auditAlg != AlgNull {
+	// Changing the audit algorithm and changing the audited-command lists are
+	// mutually exclusive (TPM 2.0 Part 3, §22.1): a different, supported auditAlg
+	// resets the digest and requires both lists to be empty; otherwise (NULL or
+	// unchanged alg) the lists are processed.
+	if auditAlg != AlgNull && auditAlg != t.audit.hashAlg {
 		if _, ok := cryptoHash(auditAlg); !ok {
 			return errorResponse(withParam(RCHash, 1))
 		}
-		if auditAlg != t.audit.hashAlg {
-			t.audit.hashAlg = auditAlg
-			t.audit.digest = nil // changing the algorithm resets the digest
+		if len(setList) != 0 || len(clearList) != 0 {
+			return errorResponse(withParam(RCValue, 2)) // cannot change alg and lists together
 		}
-	}
-	for _, cc := range setList {
-		t.audit.add(cc)
-	}
-	for _, cc := range clearList {
-		t.audit.remove(cc)
+		t.audit.hashAlg = auditAlg
+		t.audit.digest = nil
+	} else {
+		for _, cc := range setList {
+			t.audit.add(cc)
+		}
+		for _, cc := range clearList {
+			t.audit.remove(cc)
+		}
 	}
 	return t.authResponse(ac, nil, nil)
 }

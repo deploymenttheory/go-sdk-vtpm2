@@ -93,6 +93,8 @@ const (
 	CCSign                   uint32 = 0x0000015D // TPM2_Sign
 	CCUnseal                 uint32 = 0x0000015E // TPM2_Unseal
 	CCVerifySignature        uint32 = 0x00000177 // TPM2_VerifySignature
+	CCVerifyDigestSignature  uint32 = 0x000001A5 // TPM2_VerifyDigestSignature
+	CCSignDigest             uint32 = 0x000001A6 // TPM2_SignDigest
 	CCHash                   uint32 = 0x0000017D // TPM2_Hash
 	CCReadClock              uint32 = 0x00000181 // TPM2_ReadClock
 	CCNVCertify              uint32 = 0x00000184 // TPM2_NV_Certify
@@ -108,6 +110,10 @@ const (
 	CCECDHKeyGen    uint32 = 0x00000163 // TPM2_ECDH_KeyGen
 	CCECDHZGen      uint32 = 0x00000154 // TPM2_ECDH_ZGen
 	CCECCParameters uint32 = 0x00000178 // TPM2_ECC_Parameters
+	CCECCEncrypt    uint32 = 0x00000199 // TPM2_ECC_Encrypt
+	CCECCDecrypt    uint32 = 0x0000019A // TPM2_ECC_Decrypt
+	CCEncapsulate   uint32 = 0x000001A7 // TPM2_Encapsulate
+	CCDecapsulate   uint32 = 0x000001A8 // TPM2_Decapsulate
 
 	// EC commit / ECDAA / two-phase ECDH (Phase 7).
 	CCCommit      uint32 = 0x0000018B // TPM2_Commit
@@ -118,6 +124,10 @@ const (
 	CCEncryptDecrypt  uint32 = 0x00000164 // TPM2_EncryptDecrypt
 	CCEncryptDecrypt2 uint32 = 0x00000193 // TPM2_EncryptDecrypt2
 	CCCreateLoaded    uint32 = 0x00000191 // TPM2_CreateLoaded
+
+	// ACT and read-only control.
+	CCACTSetTimeout   uint32 = 0x00000198 // TPM2_ACT_SetTimeout
+	CCReadOnlyControl uint32 = 0x000001A0 // TPM2_ReadOnlyControl
 
 	// Management / test (Phase 8).
 	CCPPCommands          uint32 = 0x0000012D // TPM2_PP_Commands
@@ -132,6 +142,12 @@ const (
 	CCSequenceUpdate        uint32 = 0x0000015C // TPM2_SequenceUpdate
 	CCSequenceComplete      uint32 = 0x0000013E // TPM2_SequenceComplete
 	CCEventSequenceComplete uint32 = 0x00000185 // TPM2_EventSequenceComplete
+
+	// Sign/verify sequences (streamed data → digest → sign/verify).
+	CCVerifySequenceComplete uint32 = 0x000001A3 // TPM2_VerifySequenceComplete
+	CCSignSequenceComplete   uint32 = 0x000001A4 // TPM2_SignSequenceComplete
+	CCVerifySequenceStart    uint32 = 0x000001A9 // TPM2_VerifySequenceStart
+	CCSignSequenceStart      uint32 = 0x000001AA // TPM2_SignSequenceStart
 
 	// Policy assertions (Phase 3a — simple digest-extend assertions).
 	CCPolicyCpHash           uint32 = 0x0000016E // TPM2_PolicyCpHash
@@ -157,6 +173,7 @@ const (
 	CCPolicyAuthorizeNV       uint32 = 0x00000192 // TPM2_PolicyAuthorizeNV
 	CCPolicyCapability        uint32 = 0x0000019B // TPM2_PolicyCapability
 	CCPolicyParameters        uint32 = 0x0000019C // TPM2_PolicyParameters
+	CCPolicyTransportSPDM     uint32 = 0x000001A1 // TPM2_PolicyTransportSPDM
 
 	// TPM2_Duplicate (Phase 4) — referenced now by PolicyDuplicationSelect's
 	// implicit command-code restriction.
@@ -261,7 +278,7 @@ const (
 	RCBadAuth      uint32 = rcFmt1 + 0x022 // TPM_RC_BAD_AUTH (0x0A2)
 	RCTicket       uint32 = rcFmt1 + 0x020 // TPM_RC_TICKET (0x0A0)
 	RCECCPoint     uint32 = rcFmt1 + 0x027 // TPM_RC_ECC_POINT (0x0A7)
-	RCNoResult     uint32 = rcFmt1 + 0x01F // TPM_RC_NO_RESULT (0x09F)
+	RCNoResult     uint32 = rcVer1 + 0x054 // TPM_RC_NO_RESULT (0x154)
 	RCCurve        uint32 = rcFmt1 + 0x026 // TPM_RC_CURVE (0x0A6)
 	RCPolicyCC     uint32 = rcFmt1 + 0x024 // TPM_RC_POLICY_CC (0x0A4)
 	RCSignature    uint32 = rcFmt1 + 0x01B // TPM_RC_SIGNATURE (0x09B)

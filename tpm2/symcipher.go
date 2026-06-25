@@ -96,8 +96,17 @@ func (t *TPM) encryptDecrypt(ac *commandAuth, decrypt byte, mode uint16, ivIn, i
 	if errResp := t.authorizeObject(ac, 0, key); errResp != nil {
 		return errResp
 	}
-	if mode == AlgNull {
-		mode = key.public.Sym.Mode
+	// If the key fixes a mode, the caller must pass NULL or that same mode; if the
+	// key's mode is NULL the caller must pick a concrete mode (TPM 2.0 Part 3, §15.2,
+	// TPM_RC_MODE).
+	keyMode := key.public.Sym.Mode
+	switch {
+	case mode == AlgNull && keyMode == AlgNull:
+		return errorResponse(withParam(RCMode, 1))
+	case mode == AlgNull:
+		mode = keyMode
+	case keyMode != AlgNull && mode != keyMode:
+		return errorResponse(withParam(RCMode, 1))
 	}
 	out, ivOut, ok := symCrypt(mode, key.sensitive.Secret, ivIn, inData, decrypt != 0)
 	if !ok {

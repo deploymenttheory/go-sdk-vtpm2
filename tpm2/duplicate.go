@@ -55,7 +55,7 @@ func (t *TPM) cmdDuplicate(tag uint16, r *reader) []byte {
 	if !ok {
 		return errorResponse(RCKey)
 	}
-	dup := wrapWithSeed(newParent.public.NameAlg, seed, sw.bytes(), obj.name, newParent.public.Sym.KeyBits, t.rand)
+	dup := wrapDuplication(newParent.public.NameAlg, seed, sw.bytes(), obj.name, newParent.public.Sym.KeyBits)
 
 	var w writer
 	w.tpm2b(nil)    // encryptionKeyOut (no inner wrapper)
@@ -98,7 +98,7 @@ func (t *TPM) cmdImport(tag uint16, r *reader) []byte {
 		return errorResponse(withParam(RCValue, 4))
 	}
 	objName := objectPublic.name()
-	dec, ok := unwrapWithSeed(parent.public.NameAlg, seed, duplicate, objName, parent.public.Sym.KeyBits)
+	dec, ok := unwrapDuplication(parent.public.NameAlg, seed, duplicate, objName, parent.public.Sym.KeyBits)
 	if !ok {
 		return errorResponse(RCIntegrity)
 	}
@@ -139,7 +139,7 @@ func (t *TPM) cmdRewrap(tag uint16, r *reader) []byte {
 	if !ok {
 		return errorResponse(withParam(RCValue, 3))
 	}
-	sens2B, ok := unwrapWithSeed(oldParent.public.NameAlg, seed, inDuplicate, name, oldParent.public.Sym.KeyBits)
+	sens2B, ok := unwrapDuplication(oldParent.public.NameAlg, seed, inDuplicate, name, oldParent.public.Sym.KeyBits)
 	if !ok {
 		return errorResponse(RCIntegrity)
 	}
@@ -154,7 +154,7 @@ func (t *TPM) cmdRewrap(tag uint16, r *reader) []byte {
 	if !ok {
 		return errorResponse(RCKey)
 	}
-	out := wrapWithSeed(newParent.public.NameAlg, newSeed, sens2B, name, newParent.public.Sym.KeyBits, t.rand)
+	out := wrapDuplication(newParent.public.NameAlg, newSeed, sens2B, name, newParent.public.Sym.KeyBits)
 
 	var w writer
 	w.tpm2b(out)       // outDuplicate

@@ -153,3 +153,60 @@ func (t *TPM) cmdPolicyCapability(r *reader) []byte {
 	s.extend(be32(CCPolicyCapability), args)
 	return successResponse(nil, 0)
 }
+
+// validateSCKeyName checks an optional secure-channel key Name: an Empty Buffer is
+// allowed; otherwise the first two octets must be a valid hash algorithm and the
+// remainder its digest (TPM 2.0 Part 3, §23.25).
+func validateSCKeyName(name []byte) []byte {
+	if len(name) == 0 {
+		return nil
+	}
+	if len(name) < 2 {
+		return errorResponse(RCSize)
+	}
+	alg := uint16(name[0])<<8 | uint16(name[1])
+	sz := hashSize(alg)
+	if sz == 0 {
+		return errorResponse(RCHash)
+	}
+	if len(name) != 2+sz {
+		return errorResponse(RCSize)
+	}
+	return nil
+}
+
+// cmdPolicyTransportSPDM implements TPM2_PolicyTransportSPDM (Part 3, §23.25): a
+// deferred assertion gating a policy on an SPDM secure transport channel, binding
+// the requester and TPM secure-channel key Names into the policy digest.
+//
+// Note: this emulator has no SPDM transport layer, so the deferred secure-channel
+// check at use is a no-op; only the (testable) policy-digest update is performed.
+func (t *TPM) cmdPolicyTransportSPDM(r *reader) []byte {
+	s, errResp := t.policySession(r)
+	if errResp != nil {
+		return errResp
+	}
+	reqKeyName := r.tpm2b()
+	tpmKeyName := r.tpm2b()
+	if r.err != nil {
+		return errorResponse(RCInsufficient)
+	}
+	if s.spdmTransport {
+		return errorResponse(RCValue) // PolicyTransportSPDM may run only once per session
+	}
+	if errResp := validateSCKeyName(reqKeyName); errResp != nil {
+		return errResp
+	}
+	if errResp := validateSCKeyName(tpmKeyName); errResp != nil {
+		return errResp
+	}
+	// scKeyNameHash = H(reqKeyName.size ‖ reqKeyName ‖ tpmKeyName.size ‖ tpmKeyName).
+	var nb writer
+	nb.tpm2b(reqKeyName)
+	nb.tpm2b(tpmKeyName)
+	scKeyNameHash := hashSum(s.authHash, nb.bytes())
+
+	s.extend(be32(CCPolicyTransportSPDM), scKeyNameHash)
+	s.spdmTransport = true
+	return successResponse(nil, 0)
+}

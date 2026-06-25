@@ -38,27 +38,34 @@ booting with BitLocker** against this vTPM under QEMU.
 
 ## What it implements
 
-**52 TPM 2.0 commands**, covering the full Windows 11 / BitLocker path:
+**125 TPM 2.0 commands** — essentially the full v1.85 surface a software TPM can
+meaningfully implement (the 11 unimplemented are firmware-upgrade, Attached-Component
+and a couple of v2 NV/capability variants that need physical hardware; the dispatcher
+returns `TPM_RC_COMMAND_CODE` for those, as the spec prescribes):
 
 | Area | Commands |
 |---|---|
-| **Boot & test** | `Startup`, `Shutdown`, `SelfTest`, `GetTestResult`, `GetRandom`, `StirRandom` |
-| **Capabilities** | `GetCapability` (algorithms, commands, handles, PCRs, TPM properties) |
-| **Measured boot (PCR)** | `PCR_Read`, `PCR_Extend`, `PCR_Reset` — SHA-1 + SHA-256 banks, 24 PCRs, locality-enforced |
-| **Hierarchies** | `Clear`, `ClearControl`, `HierarchyChangeAuth`, `HierarchyControl`, `SetPrimaryPolicy`, `ChangeEPS`, `ChangePPS` |
-| **Sessions & policy** | `StartAuthSession`, `FlushContext`, `PolicyPCR`, `PolicyCommandCode`, `PolicyAuthValue`, `PolicyOR`, `PolicyGetDigest`, `PolicyRestart` |
-| **Dictionary attack** | `DictionaryAttackLockReset`, `DictionaryAttackParameters` |
-| **Objects & keys** | `CreatePrimary`, `Create`, `Load`, `LoadExternal`, `ReadPublic`, `EvictControl`, `ObjectChangeAuth`, `ContextSave`, `ContextLoad` |
-| **Sealing & signing** | `Unseal`, `Sign`, `VerifySignature`, `Hash`, `Quote` |
-| **NV storage** | `NV_DefineSpace`, `NV_UndefineSpace`, `NV_ReadPublic`, `NV_Read`, `NV_Write`, `NV_Increment`, `NV_Extend`, `NV_SetBits`, `NV_ReadLock`, `NV_WriteLock` |
-| **Clock** | `ReadClock` |
+| **Boot & test** | `Startup`, `Shutdown`, `SelfTest`, `IncrementalSelfTest`, `GetTestResult`, `GetRandom`, `StirRandom`, `TestParms` |
+| **Capabilities & management** | `GetCapability`, `SetAlgorithmSet`, `PP_Commands`, `SetCommandCodeAuditStatus`, `ReadOnlyControl`, `ACT_SetTimeout` |
+| **Measured boot (PCR)** | `PCR_Read`, `PCR_Extend`, `PCR_Event`, `PCR_Reset`, `PCR_Allocate`, `PCR_SetAuthValue`, `PCR_SetAuthPolicy` |
+| **Hierarchies & clock** | `Clear`, `ClearControl`, `HierarchyChangeAuth`, `HierarchyControl`, `SetPrimaryPolicy`, `ChangeEPS`, `ChangePPS`, `ReadClock`, `ClockSet`, `ClockRateAdjust` |
+| **Sessions & DA** | `StartAuthSession`, `FlushContext`, `DictionaryAttackLockReset`, `DictionaryAttackParameters` |
+| **Policy (full set)** | all ~23 assertions — `PolicyPCR`, `PolicyOR`, `PolicyAuthValue`/`Password`, `PolicySecret`, `PolicySigned`, `PolicyAuthorize`(`NV`), `PolicyCommandCode`, `PolicyCpHash`, `PolicyNameHash`, `PolicyNV`, `PolicyCounterTimer`, `PolicyTicket`, `PolicyDuplicationSelect`, `PolicyTemplate`, `PolicyParameters`, `PolicyCapability`, `PolicyTransportSPDM`, … |
+| **Objects & key lifecycle** | `CreatePrimary`, `Create`, `CreateLoaded`, `Load`, `LoadExternal`, `ReadPublic`, `EvictControl`, `ObjectChangeAuth`, `ContextSave`, `ContextLoad` |
+| **Duplication & credentials** | `Duplicate`, `Import`, `Rewrap`, `MakeCredential`, `ActivateCredential` |
+| **Signing, hashing & attestation** | `Sign`, `SignDigest`, `VerifySignature`, `VerifyDigestSignature`, sign/verify **sequences**, `Hash`, `HMAC`, hash sequences, `Quote`, `Certify`, `CertifyCreation`, `CertifyX509`, `GetTime`, `NV_Certify`, `GetSessionAuditDigest`, `GetCommandAuditDigest`, `Unseal` |
+| **Asymmetric & symmetric crypto** | `RSA_Encrypt`/`Decrypt`, `ECC_Encrypt`/`Decrypt`, `ECDH_KeyGen`/`ZGen`, `ZGen_2Phase`, `Commit`, `EC_Ephemeral`, `Encapsulate`/`Decapsulate`, `EncryptDecrypt`/`2`, `ECC_Parameters` |
+| **NV storage** | `NV_DefineSpace`, `NV_UndefineSpace`(`Special`), `NV_ReadPublic`, `NV_Read`, `NV_Write`, `NV_Increment`, `NV_Extend`, `NV_SetBits`, `NV_ReadLock`/`WriteLock`, `NV_GlobalWriteLock`, `NV_ChangeAuth` |
 
-**Authorization:** password, HMAC, and policy sessions, with real HMAC
-verify/respond and **parameter encryption in both directions** (XOR and AES-CFB).
+**Authorization:** password, HMAC, and policy sessions with real HMAC
+verify/respond, salted and bound sessions, **parameter encryption in both
+directions** (XOR and AES-CFB), and session + command **audit**.
 
-**Cryptography (Go standard library only):** RSA (2048-bit; RSASSA / RSA-PSS),
-ECC (NIST P-256 / P-384; ECDSA / ECDH), AES-CFB, HMAC, SHA-1/256/384/512, and the
-TPM key-derivation functions KDFa / KDFe. Primary keys (EK/SRK) are **derived
+**Cryptography (Go standard library only):** RSA (RSASSA / RSA-PSS / OAEP),
+ECC (NIST P-256 / P-384 / P-521; ECDSA / ECDH / ECDAA commit / SM2-style
+encryption / KEM), AES in CFB/OFB/CTR/CBC/ECB, HMAC, SHA-1/256/384/512, and the
+TPM key-derivation functions KDFa / KDFe, with the SP800-90A Hash_DRBG used for
+deterministic primary derivation. Primary keys (EK/SRK) are **derived
 deterministically** from the hierarchy seed, so a recreated SRK matches its
 persisted form and previously sealed blobs still load.
 
@@ -98,8 +105,12 @@ qemu-system-x86_64 \
   ...
 ```
 
-See [`docs/windows11-qemu.md`](docs/windows11-qemu.md) for the full Windows 11 +
-BitLocker boot harness.
+### Guides
+
+- **[Getting started](docs/getting-started.md)** — install, build, run, and send
+  your first command in a few minutes.
+- **[Usage guide](docs/usage-guide.md)** — embedding the core, driving it from a
+  TPM stack, persistence, sessions/auth, and the QEMU integration in depth.
 
 ## Persistence
 
@@ -111,17 +122,22 @@ objects (EK/SRK), NV indices, and the clock.
 
 ## Correctness
 
-- Command and response codes are validated against a maintained reference TPM 2.0
-  implementation.
+The implementation is reconciled against the vendored spec
+(`docs/spec/v185/`, Parts 1–3) in [`VALIDATION.md`](VALIDATION.md): a
+**261-point accuracy sweep** (constants, attribute bitfields, structure wire
+layouts, crypto constructions, the authorization/policy engine, and per-command
+semantics), each row carrying a Part + page citation. The sweep found and fixed
+four conformance bugs and documents seven by-design deviations.
+
 - The `cpHash` / authorization-HMAC path — the most interoperability-sensitive
   part — is checked two ways: against an independent in-test reimplementation, and
   against optional golden vectors captured from a real TPM stack (see
   `tpm2/testdata/`).
-- The headline reboot guarantee is tested end to end
-  (`tpm2/seal_test.go:TestSealedObjectSurvivesReboot`): seal a secret under a
-  persistent SRK, snapshot, restore into a fresh TPM, and unseal it.
+- The reboot guarantee is tested end to end
+  (`tpm2/seal_test.go`): seal a secret under a persistent SRK, snapshot, restore
+  into a fresh TPM, and unseal it.
 
-`go test ./...` exercises the full surface.
+`go test ./...` exercises the full surface (200+ tests in the `tpm2` package).
 
 ## Status & limitations
 
@@ -133,10 +149,11 @@ tested. Honest caveats:
   hardware-grade isolation or tamper resistance.
 - **The live Windows-11-on-QEMU boot is not yet verified** — that step needs a
   real QEMU + Windows 11 environment. The runner, launch script, and harness are
-  ready for it (`cmd/vtpm`, `scripts/`, `docs/windows11-qemu.md`).
-- **A focused subset of the spec**, not 100% of TPM 2.0 — the boot/BitLocker path
-  is complete; areas like duplication/migration of keys, audit sessions, and the
-  full algorithm set are out of scope for now.
+  ready for it (`cmd/vtpm`, `scripts/`).
+- **11 of 136 spec commands are unimplemented** — firmware upgrade, Attached
+  Components, and a few v2 NV/capability variants that require physical hardware a
+  software TPM cannot provide; the dispatcher returns `TPM_RC_COMMAND_CODE` for
+  them, which is the spec-faithful response.
 
 ## License
 
