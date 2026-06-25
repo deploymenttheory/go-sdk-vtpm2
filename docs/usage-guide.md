@@ -39,29 +39,49 @@ if rc := binary.BigEndian.Uint32(resp[6:10]); rc != 0 {
 }
 ```
 
-## Driving it with a TPM stack
+## The typed client
 
-Hand-building command blobs is fine for a couple of commands, but for anything real
-you want a TPM stack to marshal commands and parse responses. Any stack that can
-talk to a transport works; the simplest is to implement the stack's
-"command transport" interface as a direct call to `Execute`.
-
-With `google/go-tpm` (TPMDirect), a one-method transport bridges the two:
+Hand-building command blobs is fine for a command or two, but for real use the
+repo ships a typed, in-process-native client in the **`client`** package — so you
+don't need to build wire bytes *or* import a separate TPM stack.
 
 ```go
-// vtpmTransport adapts the in-process TPM to a go-tpm transport.
-type vtpmTransport struct{ tpm *tpm2.TPM }
+import "github.com/deploymenttheory/go-sdk-vtpm2/client"
 
-func (v vtpmTransport) Send(cmd []byte) ([]byte, error) {
-    return v.tpm.Execute(cmd), nil // Execute never errors; the rc is in the bytes
-}
+c, _ := client.OpenLocal()                 // an in-process TPM, started
+srk, _ := c.CreatePrimary(client.HandleOwner, client.ECCStorageKey(), nil)
+defer c.FlushContext(srk.Handle)
 
-// Now use go-tpm's typed command helpers against v.
+key, _ := c.CreateAndLoad(srk, client.ECCSigningKey(), []byte("auth"))
+defer c.FlushContext(key.Handle)
+pub, name, _ := c.ReadPublic(key.Handle)
 ```
 
-This gives you typed `CreatePrimary`, `Sign`, `PCRExtend`, sessions, etc. without
-building wire bytes yourself, while the responder stays fully in-process (great for
-tests and fuzzing).
+Typed templates (`ECCStorageKey`, `RSAStorageKey`, `ECCSigningKey`,
+`RSASigningKey`, `HMACKey`) mean nobody hand-rolls a `TPMT_PUBLIC`, and the loaded
+`*Key` carries its handle, Name, and public area.
+
+### Same API, any transport
+
+The client talks to a `Transport`, so the identical typed API drives an in-process
+responder, a remote swtpm socket, or real hardware:
+
+```go
+type Transport interface {
+    Execute(cmd []byte) ([]byte, error)
+}
+
+c := client.Open(client.Local(tpm2.New())) // in-process (no socket, no daemon)
+// c := client.Open(yourSocketTransport)   // or a swtpm socket / hardware
+```
+
+The in-process path (`client.Local`) is the differentiator: a fully typed TPM in
+your own process with no second dependency — ideal for tests, tooling, and fuzzing.
+
+The `client` package is being built out command-by-command (object lifecycle and
+templates first; sessions/auth, signing/attestation, and NV next). Until a
+particular command has a typed method, you can always drop to the raw boundary
+(`Execute`) or implement a transport for it.
 
 ## Sessions and authorization
 

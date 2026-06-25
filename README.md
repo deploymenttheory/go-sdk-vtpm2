@@ -73,7 +73,8 @@ persisted form and previously sealed blobs still load.
 
 | Package | Responsibility |
 |---|---|
-| `tpm2/` | The TPM 2.0 command processor: wire types & marshalling, the command dispatch, the crypto, the auth/session engine, and versioned state snapshots. `Execute([]byte) []byte`. |
+| `tpm2/` | The TPM 2.0 command processor (the **responder**): wire types & marshalling, the command dispatch, the crypto, the auth/session engine, and versioned state snapshots. `Execute([]byte) []byte`. |
+| `client/` | The typed, in-process-native **client**: turns the raw `Execute` boundary into ergonomic Go calls (templates, typed commands), over any transport. No external TPM stack needed. |
 | `state/` | Atomic, per-VM persistence of a snapshot to disk (JSON, crash-safe temp-file + rename). |
 | `swtpm/` | The swtpm control + data channel protocol QEMU's `tpm-emulator` backend speaks (Unix sockets, fd passing, state blobs, locality). |
 | `emulator/` | Top-level wiring: TPM + persistence + transport into one runnable device, plus `Provision()`. |
@@ -81,7 +82,18 @@ persisted form and previously sealed blobs still load.
 
 ## Usage
 
-### Embed the core
+### Embed it (typed client)
+
+The `client` package gives you an in-process TPM with typed commands — no wire
+blobs, no external stack:
+
+```go
+c, _ := client.OpenLocal()                                  // an in-process TPM, started
+srk, _ := c.CreatePrimary(client.HandleOwner, client.ECCStorageKey(), nil)
+key, _ := c.CreateAndLoad(srk, client.ECCSigningKey(), []byte("auth"))
+```
+
+Or drop to the raw boundary that *is* the TPM:
 
 ```go
 tpm := tpm2.New()

@@ -29,21 +29,55 @@ Or add it to your own module:
 go get github.com/deploymenttheory/go-sdk-vtpm2/tpm2
 ```
 
-## Hello, TPM — embed the core
+## Hello, TPM — the typed client
 
-The entire core is one method: `func (t *tpm2.TPM) Execute(cmd []byte) []byte` —
-a raw TPM 2.0 command blob in, a raw response blob out. A TPM must be **started**
-(`TPM2_Startup`) before it answers other commands.
+The easiest way to drive the TPM from Go is the in-repo **`client`** package: a
+typed, in-process TPM with no socket, no daemon, and no second dependency.
 
 ```go
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 
-	"github.com/deploymenttheory/go-sdk-vtpm2/tpm2"
+	"github.com/deploymenttheory/go-sdk-vtpm2/client"
 )
+
+func main() {
+	c, err := client.OpenLocal() // a fresh in-process TPM, started
+	if err != nil {
+		panic(err)
+	}
+
+	r, _ := c.GetRandom(16)
+	fmt.Printf("random: %x\n", r)
+
+	// Provision a Storage Root Key and a child signing key under it.
+	srk, _ := c.CreatePrimary(client.HandleOwner, client.ECCStorageKey(), nil)
+	defer c.FlushContext(srk.Handle)
+
+	key, _ := c.CreateAndLoad(srk, client.ECCSigningKey(), []byte("auth"))
+	defer c.FlushContext(key.Handle)
+	fmt.Printf("signing key name: %x\n", key.Name)
+}
+```
+
+```sh
+go run .
+```
+
+No hand-built command blobs, no external TPM stack. See the
+[usage guide](usage-guide.md#the-typed-client) for templates, transports, and
+where the typed API is heading.
+
+## Under the hood — the raw boundary
+
+The typed client is a thin layer over the one method that *is* the TPM:
+`func (t *tpm2.TPM) Execute(cmd []byte) []byte` — a raw command blob in, a raw
+response blob out. You can use it directly when you need to:
+
+```go
+import "encoding/binary"
 
 // cmd frames a TPM command: tag(2) ‖ size(4) ‖ commandCode(4) ‖ params.
 func cmd(tag uint16, code uint32, params []byte) []byte {
@@ -55,28 +89,11 @@ func cmd(tag uint16, code uint32, params []byte) []byte {
 	return b
 }
 
-func main() {
-	t := tpm2.New()
-
-	// TPM2_Startup(TPM_SU_CLEAR) — bring the TPM up.
-	t.Execute(cmd(0x8001 /*NO_SESSIONS*/, 0x00000144 /*Startup*/, []byte{0x00, 0x00}))
-
-	// TPM2_GetRandom(16) — ask for 16 bytes of entropy.
-	resp := t.Execute(cmd(0x8001, 0x0000017B /*GetRandom*/, []byte{0x00, 0x10}))
-
-	rc := binary.BigEndian.Uint32(resp[6:10]) // responseCode at bytes 6..10
-	random := resp[12:]                        // after header(10) + TPM2B size(2)
-	fmt.Printf("rc=0x%x  random=%x\n", rc, random)
-}
+t := tpm2.New()
+t.Execute(cmd(0x8001, 0x00000144, []byte{0x00, 0x00}))      // TPM2_Startup(CLEAR)
+resp := t.Execute(cmd(0x8001, 0x0000017B, []byte{0x00, 0x10})) // TPM2_GetRandom(16)
+// responseCode is resp[6:10]; success is 0x00000000.
 ```
-
-```sh
-go run .
-# rc=0x0  random=<16 random bytes>
-```
-
-In real use you would build command blobs with a TPM stack (e.g. `google/go-tpm`)
-rather than by hand — see the [usage guide](usage-guide.md#driving-it-with-a-tpm-stack).
 
 ## Run it as a vTPM for QEMU
 
