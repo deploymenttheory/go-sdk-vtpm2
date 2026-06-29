@@ -64,7 +64,7 @@ func TestCreateWithCommandDecryption(t *testing.T) {
 	plainCp.raw(pubW.bytes())
 	plainCp.raw(rest.bytes())
 	cph := cpHash(AlgSHA256, CCCreate, [][]byte{parent.name}, plainCp.bytes())
-	mac := commandAuthHMAC(AlgSHA256, nil, cph, nonceCaller, nonceTPM, attrs)
+	mac := commandAuthHMAC(AlgSHA256, nil, cph, nonceCaller, nonceTPM, nil, attrs)
 
 	// Encrypt only the first parameter's buffer for transmission.
 	ki := kdfa(AlgSHA256, nil, []byte("CFB"), nonceCaller, nonceTPM, 128+128)
@@ -104,6 +104,85 @@ func TestCreateWithCommandDecryption(t *testing.T) {
 	}
 }
 
+// TestCommandHMACFoldsSeparateDecryptNonce drives a two-session TPM2_Create: a
+// plain HMAC session (session 0) authorizes the parent, and a *separate* AES-CFB
+// session (session 1) decrypts the inSensitive parameter. Per TPM 2.0 Part 1
+// §16.6.5 the first authorization session must fold the decrypt session's nonceTPM
+// (nonceTPMdecrypt) into its command HMAC. The command must succeed only when that
+// nonce is included, and fail with AUTH_FAIL when it is omitted.
+func TestCommandHMACFoldsSeparateDecryptNonce(t *testing.T) {
+	tpm := New()
+	startup(t, tpm)
+	srk, _, _ := createPrimary(t, tpm, RHOwner, eccStorageTemplate())
+	parent, _ := tpm.objects.get(srk)
+
+	authH, authNonceTPM := startHMACSession(t, tpm, AlgSHA256)  // session 0: authorizes parent
+	encH, encNonceTPM := startEncryptSession(t, tpm, AlgSHA256) // session 1: decrypts inSensitive
+	authNonceCaller := bytes.Repeat([]byte{0x41}, 16)
+	encNonceCaller := bytes.Repeat([]byte{0x42}, 16)
+	const authAttrs = attrContinue
+	const encAttrs = attrDecrypt | attrContinue
+
+	// Plaintext inSensitive (userAuth ‖ data) and the rest of the Create parameters.
+	sealData := []byte("seal-via-separate-decrypt-session")
+	var sensBuf writer
+	sensBuf.tpm2b(nil)
+	sensBuf.tpm2b(sealData)
+	plainBuffer := sensBuf.bytes()
+	tmpl := sealedTemplate()
+	var pubW writer
+	tmpl.marshal2B(&pubW)
+	var rest writer
+	rest.tpm2b(nil) // outsideInfo
+	rest.u32(0)     // creationPCR
+
+	// cpHash is over the plaintext parameters; the parent has empty auth (empty key).
+	var plainCp writer
+	plainCp.tpm2b(plainBuffer)
+	plainCp.raw(pubW.bytes())
+	plainCp.raw(rest.bytes())
+	cph := cpHash(AlgSHA256, CCCreate, [][]byte{parent.name}, plainCp.bytes())
+
+	// Encrypt inSensitive under the decrypt session's KDFa-derived CFB key.
+	ki := kdfa(AlgSHA256, nil, []byte("CFB"), encNonceCaller, encNonceTPM, 128+128)
+	encBuffer := aesCFB(ki[:16], ki[16:32], plainBuffer, true)
+	var encCp writer
+	encCp.tpm2b(encBuffer)
+	encCp.raw(pubW.bytes())
+	encCp.raw(rest.bytes())
+
+	// build frames TPM2_Create with the two sessions and the given session-0 HMAC.
+	build := func(authMAC []byte) []byte {
+		var auth writer
+		auth.u32(authH)
+		auth.tpm2b(authNonceCaller)
+		auth.u8(authAttrs)
+		auth.tpm2b(authMAC)
+		auth.u32(encH)
+		auth.tpm2b(encNonceCaller)
+		auth.u8(encAttrs)
+		auth.tpm2b(nil) // decrypt session carries no authorization HMAC
+		var body writer
+		body.u32(srk)
+		body.u32(uint32(len(auth.bytes())))
+		body.raw(auth.bytes())
+		body.raw(encCp.bytes())
+		return buildCmd(TPMSTSessions, CCCreate, body.bytes())
+	}
+
+	// Negative: omit nonceTPMdecrypt → the first session's HMAC must not verify.
+	without := commandAuthHMAC(AlgSHA256, nil, cph, authNonceCaller, authNonceTPM, nil, authAttrs)
+	if _, rc, _ := parseResp(t, tpm.Execute(build(without))); baseRC(rc) != RCAuthFail {
+		t.Fatalf("Create without nonceTPMdecrypt rc = 0x%x, want AUTH_FAIL", rc)
+	}
+
+	// Positive: fold in the decrypt session's nonceTPM → success.
+	with := commandAuthHMAC(AlgSHA256, nil, cph, authNonceCaller, authNonceTPM, encNonceTPM, authAttrs)
+	if _, rc, _ := parseResp(t, tpm.Execute(build(with))); rc != RCSuccess {
+		t.Fatalf("Create with nonceTPMdecrypt rc = 0x%x, want success", rc)
+	}
+}
+
 // TestUnsealWithResponseEncryption drives an encrypt session the way a TSS does:
 // the Unseal response (the VMK) comes back AES-CFB-encrypted, and the test derives
 // the same key to recover it.
@@ -122,7 +201,7 @@ func TestUnsealWithResponseEncryption(t *testing.T) {
 
 	// Compute the command auth HMAC (sealed object has empty auth → empty key).
 	cph := cpHash(AlgSHA256, CCUnseal, [][]byte{obj.name}, nil)
-	mac := commandAuthHMAC(AlgSHA256, nil, cph, nonceCaller, nonceTPM, attrs)
+	mac := commandAuthHMAC(AlgSHA256, nil, cph, nonceCaller, nonceTPM, nil, attrs)
 
 	var auth writer
 	auth.u32(sh)

@@ -120,7 +120,7 @@ func TestAuthGoldenVectors(t *testing.T) {
 
 			// Authorization HMAC: auth.go must equal the independent reference.
 			key := authHMACKey(sessionKey, authValue, v.Bound)
-			gotMAC := commandAuthHMAC(alg, key, gotCp, nonceCaller, nonceTPM, v.Attributes)
+			gotMAC := commandAuthHMAC(alg, key, gotCp, nonceCaller, nonceTPM, nil, v.Attributes)
 			refMAC := refCommandHMAC(newHashFn, sessionKey, authValue, v.Bound, gotCp, nonceCaller, nonceTPM, v.Attributes)
 			if !bytes.Equal(gotMAC, refMAC) {
 				t.Fatalf("authHMAC mismatch vs reference\n auth.go: %x\nref:     %x", gotMAC, refMAC)

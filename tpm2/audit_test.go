@@ -30,7 +30,7 @@ func TestSessionAudit(t *testing.T) {
 	cpParams := auditedChangeAuthCP(newAuth)
 	cph := cpHash(AlgSHA256, CCHierarchyChangeAuth, [][]byte{permanentName(RHOwner)}, cpParams)
 	const attrs = attrContinue | attrAudit
-	mac := commandAuthHMAC(AlgSHA256, nil, cph, nonceCaller, nonceTPM, attrs) // empty key (unbound, empty auth)
+	mac := commandAuthHMAC(AlgSHA256, nil, cph, nonceCaller, nonceTPM, nil, attrs) // empty key (unbound, empty auth)
 	if _, rc, _ := parseResp(t, tpm.Execute(changeAuthCmd(RHOwner, sh, nonceCaller, attrs, mac, newAuth))); rc != RCSuccess {
 		t.Fatalf("audited HierarchyChangeAuth rc = 0x%x", rc)
 	}

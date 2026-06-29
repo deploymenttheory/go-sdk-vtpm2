@@ -172,11 +172,17 @@ func (t *TPM) verifyAuth(ac *commandAuth, sessionIdx int, entityName, authValue,
 			return errorResponse(withSession(RCHandle, sessionIdx+1))
 		}
 		bound := len(as.bindName) > 0 && hmac.Equal(as.bindName, entityName)
+		// The first authorization session folds in the nonceTPM of any separate
+		// decrypt/encrypt session (TPM 2.0 Part 1, §16.6.5); other sessions do not.
+		var cross []byte
+		if sessionIdx == 0 {
+			cross = t.crossSessionNonces(ac)
+		}
 		switch as.kind {
 		case seHMAC:
 			cph := cpHash(as.authHash, ac.cc, t.commandHandleNames(ac), ac.cpParams)
 			key := authHMACKey(as.sessionKey, authValue, bound)
-			want := commandAuthHMAC(as.authHash, key, cph, s.nonce, as.nonceTPM, s.attrs)
+			want := commandAuthHMAC(as.authHash, key, cph, s.nonce, as.nonceTPM, cross, s.attrs)
 			if !hmac.Equal(want, s.hmac) {
 				return fail()
 			}
@@ -199,7 +205,7 @@ func (t *TPM) verifyAuth(ac *commandAuth, sessionIdx int, entityName, authValue,
 			if as.policyAuth { // PolicyAuthValue: also prove the authValue via HMAC
 				cph := cpHash(as.authHash, ac.cc, t.commandHandleNames(ac), ac.cpParams)
 				key := authHMACKey(as.sessionKey, authValue, false)
-				want := commandAuthHMAC(as.authHash, key, cph, s.nonce, as.nonceTPM, s.attrs)
+				want := commandAuthHMAC(as.authHash, key, cph, s.nonce, as.nonceTPM, cross, s.attrs)
 				if !hmac.Equal(want, s.hmac) {
 					return fail()
 				}
@@ -242,7 +248,14 @@ func (t *TPM) authResponse(ac *commandAuth, respHandles []uint32, rpParams []byt
 			auths[i] = respAuth{cont: cont}
 			continue
 		}
-		as := ac.resolved[i].live
+		// A session that did not authorize a handle (e.g. a standalone decrypt/encrypt
+		// session) has no resolved entry; treat it as live==nil rather than indexing
+		// out of range.
+		var ra resolvedAuth
+		if i < len(ac.resolved) {
+			ra = ac.resolved[i]
+		}
+		as := ra.live
 		if as == nil {
 			auths[i] = respAuth{cont: cont}
 			continue
@@ -253,13 +266,13 @@ func (t *TPM) authResponse(ac *commandAuth, respHandles []uint32, rpParams []byt
 		var mac []byte
 		if as.kind == seHMAC || (as.kind == sePolicy && as.policyAuth) {
 			rph := rpHash(as.authHash, RCSuccess, ac.cc, rpParams)
-			key := authHMACKey(as.sessionKey, ac.resolved[i].authValue, ac.resolved[i].bound)
+			key := authHMACKey(as.sessionKey, ra.authValue, ra.bound)
 			mac = responseAuthHMAC(as.authHash, key, rph, nonce, s.nonce, cont)
 		}
 		auths[i] = respAuth{nonce: nonce, mac: mac, cont: cont}
 		if s.attrs&attrEncrypt != 0 && encSess == nil {
-			encSess, encNonce, encOlder, encAuthVal = as, nonce, s.nonce, ac.resolved[i].authValue
-			encBound = ac.resolved[i].bound
+			encSess, encNonce, encOlder, encAuthVal = as, nonce, s.nonce, ra.authValue
+			encBound = ra.bound
 		}
 		if cont == 0 {
 			t.sessions.flush(s.handle)
@@ -344,11 +357,49 @@ func authHMACKey(sessionKey, authValue []byte, bound bool) []byte {
 }
 
 // commandAuthHMAC computes the authorization HMAC a caller must present in a
-// command (TPM 2.0 Part 1, §19.6.5):
+// command (TPM 2.0 Part 1, §16.6.5):
 //
-//	HMAC_alg(key, cpHash ‖ nonceCaller ‖ nonceTPM ‖ sessionAttributes)
-func commandAuthHMAC(alg uint16, key, cp, nonceCaller, nonceTPM []byte, attrs byte) []byte {
-	return hmacSum(alg, key, cp, nonceCaller, nonceTPM, []byte{attrs})
+//	HMAC_alg(key, cpHash ‖ nonceCaller ‖ nonceTPM {‖ nonceTPMdecrypt}{‖ nonceTPMencrypt} ‖ sessionAttributes)
+//
+// crossNonces carries the optional nonceTPMdecrypt‖nonceTPMencrypt that the first
+// authorization session folds in when a *different* session does parameter
+// decryption/encryption (empty for every other session); see crossSessionNonces.
+func commandAuthHMAC(alg uint16, key, cp, nonceCaller, nonceTPM, crossNonces []byte, attrs byte) []byte {
+	return hmacSum(alg, key, cp, nonceCaller, nonceTPM, crossNonces, []byte{attrs})
+}
+
+// crossSessionNonces returns the nonceTPMdecrypt‖nonceTPMencrypt that the first
+// authorization session of a command must fold into its HMAC (TPM 2.0 Part 1,
+// §16.6.5, p.118–120). The decrypt/encrypt nonce is included only when a session
+// *other than the first* carries that attribute; if a single non-first session is
+// used for both decrypt and encrypt, its nonceTPM is included once. The result is
+// empty (a no-op for the HMAC) in the common single-session case.
+func (t *TPM) crossSessionNonces(ac *commandAuth) []byte {
+	dIdx, eIdx := -1, -1
+	for i, s := range ac.sessions {
+		if i == 0 {
+			continue // the first session is the one whose HMAC we are augmenting
+		}
+		if dIdx == -1 && s.attrs&attrDecrypt != 0 {
+			dIdx = i
+		}
+		if eIdx == -1 && s.attrs&attrEncrypt != 0 {
+			eIdx = i
+		}
+	}
+	nonceOf := func(idx int) []byte {
+		if idx < 0 {
+			return nil
+		}
+		if as, ok := t.sessions.get(ac.sessions[idx].handle); ok {
+			return as.nonceTPM
+		}
+		return nil
+	}
+	if dIdx >= 0 && dIdx == eIdx { // same session decrypts and encrypts: include once
+		return nonceOf(dIdx)
+	}
+	return append(append([]byte(nil), nonceOf(dIdx)...), nonceOf(eIdx)...)
 }
 
 // responseAuthHMAC computes the authorization HMAC the TPM returns in a response.

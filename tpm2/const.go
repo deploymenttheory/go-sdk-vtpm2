@@ -373,8 +373,12 @@ const (
 
 // ECC curve identifiers (TPM_ECC_CURVE). NIST P-256/P-384/P-521 are backed by the
 // Go standard library; the SM2 and Barreto-Naehrig curves the spec also defines
-// are intentionally absent (no pure-Go stdlib support).
+// are intentionally absent (no pure-Go stdlib support). P-224 is supported for
+// curve queries (TPM2_ECC_Parameters) and point operations on externally-loaded
+// keys via crypto/elliptic, but P-224 keys cannot be generated: deterministic key
+// derivation requires crypto/ecdh, which has no P-224 (see deriveECCKey).
 const (
+	ECCNistP224 uint16 = 0x0002 // TPM_ECC_NIST_P224 (queries / external keys only)
 	ECCNistP256 uint16 = 0x0003 // TPM_ECC_NIST_P256
 	ECCNistP384 uint16 = 0x0004 // TPM_ECC_NIST_P384
 	ECCNistP521 uint16 = 0x0005 // TPM_ECC_NIST_P521

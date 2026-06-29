@@ -67,7 +67,7 @@ func TestHMACSessionRoundTrip(t *testing.T) {
 	cph := cpHash(AlgSHA256, CCHierarchyChangeAuth, [][]byte{permanentName(RHOwner)}, cpParams)
 	key := []byte("ownerpw") // empty sessionKey ‖ authValue
 	const attrs = attrContinue
-	mac := commandAuthHMAC(AlgSHA256, key, cph, nonceCaller, nonceTPM, attrs)
+	mac := commandAuthHMAC(AlgSHA256, key, cph, nonceCaller, nonceTPM, nil, attrs)
 
 	tag, rc, p := parseResp(t, tpm.Execute(changeAuthCmd(RHOwner, sh, nonceCaller, attrs, mac, newAuth)))
 	if rc != RCSuccess {
@@ -108,7 +108,7 @@ func TestHMACSessionWrongAuth(t *testing.T) {
 	cp.tpm2b(newAuth)
 	cph := cpHash(AlgSHA256, CCHierarchyChangeAuth, [][]byte{permanentName(RHOwner)}, cp.bytes())
 	// Wrong key (wrong authValue) → AUTH_FAIL.
-	mac := commandAuthHMAC(AlgSHA256, []byte("WRONG"), cph, nonceCaller, nonceTPM, 0)
+	mac := commandAuthHMAC(AlgSHA256, []byte("WRONG"), cph, nonceCaller, nonceTPM, nil, 0)
 	_, rc, _ := parseResp(t, tpm.Execute(changeAuthCmd(RHOwner, sh, nonceCaller, 0, mac, newAuth)))
 	if baseRC(rc) != RCAuthFail {
 		t.Fatalf("wrong HMAC rc = 0x%x, want AUTH_FAIL", rc)

@@ -90,6 +90,24 @@ func (r *reader) tpm2b() []byte {
 	return r.bytes(n)
 }
 
+// boundedListCount reads a UINT32 list/array element count and rejects one that is
+// implausibly large before it is used to size an allocation. Every list element
+// consumes at least one byte on the wire, so a count exceeding the bytes remaining
+// is malformed; this latches errBadValue (→ TPM_RC_VALUE) rather than letting a
+// hostile count drive a multi-gigabyte make(). Returns the count and whether it is
+// in range.
+func (r *reader) boundedListCount() (uint32, bool) {
+	n := r.u32()
+	if r.err != nil {
+		return 0, false
+	}
+	if n > uint32(r.remaining()) {
+		r.err = errBadValue
+		return 0, false
+	}
+	return n, true
+}
+
 // bytes consumes exactly n bytes and returns a copy.
 func (r *reader) bytes(n int) []byte {
 	if r.err != nil {

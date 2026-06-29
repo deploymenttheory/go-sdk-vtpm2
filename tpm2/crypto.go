@@ -218,6 +218,8 @@ func (d *hashDRBG) Read(p []byte) (int, error) {
 // Used for ECDSA, which the crypto/ecdh package cannot do.
 func curveFor(curveID uint16) elliptic.Curve {
 	switch curveID {
+	case ECCNistP224:
+		return elliptic.P224()
 	case ECCNistP256:
 		return elliptic.P256()
 	case ECCNistP384:
@@ -497,8 +499,9 @@ func kdfe(alg uint16, z, label, partyU, partyV []byte, bits int) []byte {
 	if h == nil || bits <= 0 {
 		return nil
 	}
-	out := make([]byte, 0, (bits+7)/8)
-	for i := uint32(1); len(out)*8 < bits; i++ {
+	need := (bits + 7) / 8
+	out := make([]byte, 0, need)
+	for i := uint32(1); len(out) < need; i++ {
 		h.Reset()
 		var ctr [4]byte
 		binary.BigEndian.PutUint32(ctr[:], i)
@@ -508,9 +511,12 @@ func kdfe(alg uint16, z, label, partyU, partyV []byte, bits int) []byte {
 		h.Write([]byte{0x00})
 		h.Write(partyU)
 		h.Write(partyV)
-		out = append(out, h.Sum(nil)...)
+		sum := h.Sum(nil)
+		if len(out)+len(sum) > need {
+			sum = sum[:need-len(out)] // only the final fragment's needed bytes
+		}
+		out = append(out, sum...)
 	}
-	out = out[:(bits+7)/8]
 	if rem := bits % 8; rem != 0 {
 		out[0] &= byte(1<<rem) - 1
 	}

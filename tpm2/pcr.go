@@ -160,8 +160,8 @@ func (sel pcrSelection) selected(index int) bool {
 
 // readPCRSelectionList reads a TPML_PCR_SELECTION from r.
 func readPCRSelectionList(r *reader) []pcrSelection {
-	count := r.u32()
-	if r.err != nil {
+	count, ok := r.boundedListCount()
+	if !ok {
 		return nil
 	}
 	out := make([]pcrSelection, 0, count)
@@ -199,8 +199,8 @@ type digestValue struct {
 
 // readDigestValues reads a TPML_DIGEST_VALUES from r.
 func readDigestValues(r *reader) []digestValue {
-	count := r.u32()
-	if r.err != nil {
+	count, ok := r.boundedListCount()
+	if !ok {
 		return nil
 	}
 	out := make([]digestValue, 0, count)

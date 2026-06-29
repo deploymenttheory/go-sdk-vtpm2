@@ -17,14 +17,16 @@ pure-Go software TPM cannot meaningfully provide — the dispatcher returns
 | A. Constant values (`const.go`) | 51 | 49 | 1 | 1 |
 | B. Attribute bitfields (TPMA_*) | 45 | 44 | 0 | 1 |
 | C. Structure wire layouts | 34 | 34 | 0 | 0¹ |
-| D. Crypto constructions (Part 1) | 37 | 35 | 0 | 2 |
-| E. Auth / session / policy semantics | 37 | 37 | 0 | 0² |
-| F. Per-command parameter/semantics | 57 | 52 | 2 | 3 |
-| **Total** | **261** | **251** | **4** | **7** |
+| D. Crypto constructions (Part 1) | 37 | 35 | 0 | 3 |
+| E. Auth / session / policy semantics | 38 | 37 | 1 | 0² |
+| F. Per-command parameter/semantics | 57 | 52 | 2 | 4 |
+| **Total** | **262** | **251** | **5** | **9** |
 
 ¹ One non-layout privacy note (unobfuscated firmwareVersion/clock). ² One
-HASH_COUNT design choice. **All four bugs are fixed** (one, RC_NO_RESULT, was found
-in cluster A; the other three by the structure/crypto/per-command sweeps).
+HASH_COUNT design choice. **All five bugs are fixed** (one, RC_NO_RESULT, was found
+in cluster A; three by the structure/crypto/per-command sweeps; and the
+decrypt/encrypt-nonce HMAC gap, bug #5, by a re-audit of cluster E against
+Part 1 §16.6.5).
 
 **Build status after fixes:** `go build ./... && go vet ./... && go test ./...`
 green across all packages.
@@ -37,6 +39,7 @@ green across all packages.
 | 2 | Duplication outer wrap used the **object-storage** form (random symIv, HMAC over `symIv‖enc‖name`) instead of the duplication form | Part 1 p.170 eq 41/43 — **zero IV**, no symIv field, HMAC over `dupSensitive‖name` | `protect.go`: new `wrapDuplication`/`unwrapDuplication`; `duplicate.go` switched to them — now wire-compatible with hardware-TPM Import/Duplicate |
 | 3 | `EncryptDecrypt` ignored a caller `mode` conflicting with the key's fixed mode | Part 3 p.119 — must return `TPM_RC_MODE` if mode ≠ NULL and ≠ key mode (or NULL on a NULL-mode key) | `symcipher.go`: added the mode-match check |
 | 4 | `SetCommandCodeAuditStatus` changed the audit algorithm **and** processed the command lists together | Part 3 p.190 — these are mutually exclusive; a different alg requires empty lists | `audit.go`: change-alg vs change-list now exclusive (`RC_VALUE` otherwise) |
+| 5 | The first authorization session's command HMAC omitted `nonceTPMdecrypt`/`nonceTPMencrypt` when a **separate** session carried the decrypt/encrypt attribute | Part 1 p.118–120 (§16.6.5) — `data := pHash ‖ nonceNewer ‖ nonceOlder {‖ nonceTPMdecrypt}{‖ nonceTPMencrypt} ‖ sessionAttributes`, command-direction only; a single non-first session used for both contributes its nonce once | `auth.go`: `commandAuthHMAC` takes the cross-session nonces and `crossSessionNonces` derives them for session 0; single-session HMAC is byte-unchanged. Also hardened `authResponse` against indexing a non-authorizing session's (absent) resolution |
 
 ## Deviations by design (documented, not bugs)
 
@@ -55,6 +58,15 @@ green across all packages.
 - **`PolicyTransportSPDM`** is a deferred assertion checked at use against a live
   SPDM channel; the emulator has no SPDM transport, so the digest update is
   implemented but the secure-channel check is a no-op (documented in code).
+- **`PCR_Allocate`** applies the new bank allocation immediately (`pcr_admin.go`)
+  rather than storing it for the next `_TPM_Init` (Part 3 p.199). Wire behaviour and
+  the success response are unchanged; only the timing of the reallocation differs —
+  an acceptable emulator simplification.
+- **ECC NIST P-224** is supported for curve queries (`TPM2_ECC_Parameters`) and point
+  operations on externally-loaded keys via `crypto/elliptic`, but P-224 keys cannot be
+  **generated**: deterministic key derivation uses `crypto/ecdh`, which has no P-224, so
+  `Create`/`CreatePrimary` on a P-224 template returns `TPM_RC_KEY`. The pure-Go,
+  zero-dependency constraint precludes full P-224 support.
 
 ---
 
@@ -97,9 +109,10 @@ KDFe (counter‖Z‖OtherInfo) match Part 1 §8.4.10. Object protection
 zero-IV encIdentity, eq 44–47), salt ("SECRET", RSA-OAEP/ECDH+KDFe), the "ATH"
 session key, param-encryption "CFB"/"XOR" labels, SP800-90A Hash_DRBG primary
 seeding, and two-phase ECDH all verified. **Findings:** duplication outer wrap
-(bug #2, fixed); SM2 KDF (deviation).
+(bug #2, fixed); SM2 KDF and ECC P-224 (queries/external keys only, no key
+generation) (deviations).
 
-## Cluster E — Auth / session / policy semantics (37 points)
+## Cluster E — Auth / session / policy semantics (38 points)
 
 `cpHash`/`rpHash` formulas, command/response auth-HMAC data + nonce ordering,
 bound-session authValue omission, KDFa session key, the two-step `PolicyUpdate`
@@ -107,7 +120,9 @@ bound-session authValue omission, KDFa session key, the two-step `PolicyUpdate`
 CommandCode, AuthValue/Password, CpHash, NameHash, NV, CounterTimer, Secret,
 Signed, Authorize, DuplicationSelect, Template, AuthorizeNV, Parameters,
 Capability, Ticket, NvWritten) plus the `TPM_EO` comparison table (0x0–0xB) — **all
-aligned**. PolicyOR cap (deviation).
+aligned**. PolicyOR cap (deviation). **Finding:** the first authorization session's
+command HMAC omitted the separate decrypt/encrypt session's `nonceTPM` (bug #5,
+fixed; Part 1 §16.6.5).
 
 ## Cluster F — Per-command parameter/semantic correctness (57 points)
 
@@ -119,17 +134,21 @@ ECC_Encrypt/Decrypt), symmetric (EncryptDecrypt/2, CreateLoaded), signing
 (Sign/SignDigest/VerifySignature/sequences) and NV (Write/Read/Increment/Extend/
 SetBits/DefineSpace/ChangeAuth/GlobalWriteLock/UndefineSpaceSpecial). **Findings:**
 EncryptDecrypt mode rule (bug #3, fixed); SetCommandCodeAuditStatus exclusivity
-(bug #4, fixed); GetCommandAuditDigest counter/NULL-sign + Rewrap NULL-parent
-(deviations).
+(bug #4, fixed); GetCommandAuditDigest counter/NULL-sign + Rewrap NULL-parent +
+PCR_Allocate immediate-apply (deviations).
 
 ## Verification
 
-- 261 spec-cited reference points; **251 aligned, 4 bugs fixed, 7 documented
+- 262 spec-cited reference points; **251 aligned, 5 bugs fixed, 9 documented
   deviations**.
 - After all fixes: `go build ./... && go vet ./... && go test ./...` green.
   Regression tests were added for each fix — the duplication round-trip
   (`Duplicate→Import→Load`, `Rewrap`), the EncryptDecrypt mode rule
-  (`TestEncryptDecryptModeMismatch`), and the audit algorithm/list exclusivity
-  (`TestCommandAuditClear`).
+  (`TestEncryptDecryptModeMismatch`), the audit algorithm/list exclusivity
+  (`TestCommandAuditClear`), and the decrypt/encrypt-nonce HMAC
+  (`TestCommandHMACFoldsSeparateDecryptNonce`, positive + negative).
+- Hardening (not conformance): wire-supplied list counts are bounded before
+  allocation (`reader.boundedListCount`, regression `TestListCountBounds`), closing
+  a crafted-count OOM/panic in `readPCRSelectionList`/`readDigestValues`.
 - Methodology: six parallel read-only audit agents, each citing Part + page from
   `docs/spec/v185/`; findings cross-verified against the spec text before any fix.
