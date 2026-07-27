@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1](https://github.com/deploymenttheory/go-sdk-vtpm2/compare/v1.0.0...v1.0.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **tpm2:** correct misnumbered PT_FIXED tags and complete the property table ([24170d1](https://github.com/deploymenttheory/go-sdk-vtpm2/commit/24170d167dfa8497496267bb4ab5e68d76e7b0cd))
+* **tpm2:** correct misnumbered PT_FIXED tags and complete the property table ([e87ab14](https://github.com/deploymenttheory/go-sdk-vtpm2/commit/e87ab14b7c36d7fa8d986a7bba4ea786846819ce))
+
 ## 1.0.0 (2026-06-29)
 
 
