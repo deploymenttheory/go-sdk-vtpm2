@@ -452,6 +452,11 @@ const (
 // sessions). The constants below cover the fixed identity and capacity values
 // Windows reads during TPM startup.
 const (
+	// ptGroup is the TPM_PT group stride (TPM_PT_GROUP). Property tags are organised
+	// into groups of this size and TPM2_GetCapability returns properties from a single
+	// group — a query must not run past its boundary into the next one.
+	ptGroup uint32 = 0x100
+
 	ptFixed uint32 = 0x100 // PT_FIXED group base
 
 	PTFamilyIndicator  uint32 = ptFixed + 0x000 // "2.0\0"
@@ -474,13 +479,35 @@ const (
 	PTActiveSessionMax uint32 = ptFixed + 0x011
 	PTPCRCount         uint32 = ptFixed + 0x012 // TPM_PT_PCR_COUNT
 	PTPCRSelectMin     uint32 = ptFixed + 0x013
-	PTMaxCommandSize   uint32 = ptFixed + 0x01E
-	PTMaxResponseSize  uint32 = ptFixed + 0x01F
-	PTMaxDigest        uint32 = ptFixed + 0x020 // TPM_PT_MAX_DIGEST
-	PTTotalCommands    uint32 = ptFixed + 0x029
-	PTLibraryCommands  uint32 = ptFixed + 0x02A
-	PTVendorCommands   uint32 = ptFixed + 0x02B
-	PTModes            uint32 = ptFixed + 0x02D
+	PTContextGapMax    uint32 = ptFixed + 0x014
+	// NOTE: PT_FIXED + 0x015 is not assigned by the spec — the group is not contiguous.
+	PTNVCountersMax     uint32 = ptFixed + 0x016
+	PTNVIndexMax        uint32 = ptFixed + 0x017
+	PTMemory            uint32 = ptFixed + 0x018 // TPMA_MEMORY
+	PTClockUpdate       uint32 = ptFixed + 0x019
+	PTContextHash       uint32 = ptFixed + 0x01A
+	PTContextSym        uint32 = ptFixed + 0x01B
+	PTContextSymSize    uint32 = ptFixed + 0x01C
+	PTOrderlyCount      uint32 = ptFixed + 0x01D
+	PTMaxCommandSize    uint32 = ptFixed + 0x01E
+	PTMaxResponseSize   uint32 = ptFixed + 0x01F
+	PTMaxDigest         uint32 = ptFixed + 0x020 // TPM_PT_MAX_DIGEST
+	PTMaxObjectContext  uint32 = ptFixed + 0x021
+	PTMaxSessionContext uint32 = ptFixed + 0x022
+	PTPSFamilyIndicator uint32 = ptFixed + 0x023 // platform-specific family — PC Client = 1
+	PTPSLevel           uint32 = ptFixed + 0x024
+	PTPSRevision        uint32 = ptFixed + 0x025
+	PTSplitMax          uint32 = ptFixed + 0x026
+	// The four below were previously misnumbered (0x029/0x02A/0x02B/0x02D), which shifted
+	// TOTAL_COMMANDS/LIBRARY_COMMANDS onto VENDOR_COMMANDS/NV_BUFFER_MAX and emitted a
+	// property 0x12D that does not exist in the spec. Windows' tpm.sys reads this table
+	// during StartDevice and refused the device (CM_PROB_FAILED_START) as a result.
+	PTTotalCommands   uint32 = ptFixed + 0x027
+	PTLibraryCommands uint32 = ptFixed + 0x028
+	PTVendorCommands  uint32 = ptFixed + 0x029
+	PTNVBufferMax     uint32 = ptFixed + 0x02A
+	PTModes           uint32 = ptFixed + 0x02B
+	PTMaxCapBuffer    uint32 = ptFixed + 0x02C
 
 	// PT_VAR group (run-time state), reported from live values.
 	ptVar             uint32 = 0x200
