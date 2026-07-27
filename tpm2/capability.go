@@ -37,13 +37,33 @@ var fixedProperties = []taggedProperty{
 	{PTActiveSessionMax, 64},
 	{PTPCRCount, numPCR},
 	{PTPCRSelectMin, pcrSelectMin},
+	{PTContextGapMax, 0xFFFF},
+	{PTNVCountersMax, 0}, // no NV slots reserved exclusively for counters
+	{PTNVIndexMax, 2048}, // largest NV index data size
+	{PTMemory, 0},        // TPMA_MEMORY: nothing shared between RAM and NV
+	{PTClockUpdate, 1 << 17},
+	{PTContextHash, uint32(AlgSHA256)},
+	{PTContextSym, uint32(AlgAES)},
+	{PTContextSymSize, 128},
+	{PTOrderlyCount, 255}, // counter increments before an NV write is forced
 	{PTMaxCommandSize, 4096},
 	{PTMaxResponseSize, 4096},
 	{PTMaxDigest, 32}, // SHA-256
+	{PTMaxObjectContext, 2048},
+	{PTMaxSessionContext, 2048},
+	// PC Client platform identity. TPM_PT_PS_FAMILY_INDICATOR = 1 is "PC Client"
+	// (TCG PC Client Platform TPM Profile). Windows' tpm.sys reads this group during
+	// StartDevice; with the triple absent the device was refused outright.
+	{PTPSFamilyIndicator, 1},
+	{PTPSLevel, 0},
+	{PTPSRevision, 105}, // PC Client Platform TPM Profile 1.05
+	{PTSplitMax, 0},     // split signing not supported
 	{PTTotalCommands, uint32(len(commandTable))},
 	{PTLibraryCommands, uint32(len(commandTable))},
 	{PTVendorCommands, 0},
-	{PTModes, 0},
+	{PTNVBufferMax, 1024}, // max NV_Read/NV_Write payload, bounded by PT_INPUT_BUFFER
+	{PTModes, 0},          // TPMA_MODES: FIPS_140_2 not claimed
+	{PTMaxCapBuffer, 1024},
 }
 
 // advertisedAlgs is the ascending list of algorithms reported under
@@ -242,9 +262,20 @@ func (t *TPM) writeProperties(w *writer, property, count uint32) byte {
 	// The fixed identity/capacity properties precede the run-time PT_VAR group;
 	// both are ascending, so the concatenation stays ascending.
 	all := append(append([]taggedProperty(nil), fixedProperties...), t.varProperties()...)
+	// TPM_PT values are organised in groups of ptGroup (PT_FIXED = 0x100,
+	// PT_VAR = 0x200) and a query returns properties from the group of the requested
+	// tag only — it must not run past the group boundary. Concatenating both groups
+	// and filtering solely on ">= property" leaked PT_VAR values (0x20E..0x211) into a
+	// PT_FIXED reply, and then reported moreData=NO, so a caller reading the fixed
+	// group saw run-time properties spliced onto the end and no indication anything
+	// was wrong. A tag below the first group is treated as starting at PT_FIXED.
+	group := property / ptGroup
+	if group == 0 {
+		group = ptFixed / ptGroup
+	}
 	var selected []taggedProperty
 	for _, p := range all {
-		if p.property >= property {
+		if p.property >= property && p.property/ptGroup == group {
 			selected = append(selected, p)
 		}
 	}
