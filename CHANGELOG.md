@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2](https://github.com/deploymenttheory/go-sdk-vtpm2/compare/v1.0.1...v1.0.2) (2026-07-28)
+
+
+### Bug Fixes
+
+* pt var permanent startup clear ([3de4d27](https://github.com/deploymenttheory/go-sdk-vtpm2/commit/3de4d2726615b0b3649092a33798e0bba8d4c195))
+* **tpm2:** advertise every algorithm the TPM implements in TPM_CAP_ALGS ([7bd4655](https://github.com/deploymenttheory/go-sdk-vtpm2/commit/7bd4655a3d413041146cc5aff2d096c1af1164c9))
+* **tpm2:** report TPM_PT_PERMANENT and TPM_PT_STARTUP_CLEAR ([bd9642a](https://github.com/deploymenttheory/go-sdk-vtpm2/commit/bd9642a0afde1303f2e1070664935d0f13d3dec3))
+
 ## [1.0.1](https://github.com/deploymenttheory/go-sdk-vtpm2/compare/v1.0.0...v1.0.1) (2026-07-27)
 
 
