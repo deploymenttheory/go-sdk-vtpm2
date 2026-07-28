@@ -117,3 +117,97 @@ func TestGetCapabilityStaysInPropertyGroup(t *testing.T) {
 		t.Error("PT_VAR query returned nothing; run-time properties are now unreachable")
 	}
 }
+
+// TestVarPropertyTagsMatchSpec pins the PT_VAR tags to TPM 2.0 Part 2 (PT_VAR = 0x200).
+func TestVarPropertyTagsMatchSpec(t *testing.T) {
+	want := map[string]uint32{
+		"PERMANENT": 0x200, "STARTUP_CLEAR": 0x201, "LOCKOUT_COUNTER": 0x20E,
+		"MAX_AUTH_FAIL": 0x20F, "LOCKOUT_INTERVAL": 0x210, "LOCKOUT_RECOVERY": 0x211,
+	}
+	got := map[string]uint32{
+		"PERMANENT": PTPermanent, "STARTUP_CLEAR": PTStartupClear,
+		"LOCKOUT_COUNTER": PTLockoutCounter, "MAX_AUTH_FAIL": PTMaxAuthFail,
+		"LOCKOUT_INTERVAL": PTLockoutInterval, "LOCKOUT_RECOVERY": PTLockoutRecovery,
+	}
+	for name, w := range want {
+		if g := got[name]; g != w {
+			t.Errorf("TPM_PT_%s = %#x, want %#x", name, g, w)
+		}
+	}
+}
+
+// TestVarPropertiesReportHierarchyState is the regression guard for the defect that kept
+// Windows 11 from starting the TPM. TPM_PT_PERMANENT and TPM_PT_STARTUP_CLEAR were absent
+// from the PT_VAR group, so a GetCapability for 0x200 was answered with the first property
+// at or after it — tag 0x20E, the lockout counter — with moreData=YES and rc=0. Nothing
+// errored; the driver simply never learned the hierarchies were enabled, read the value as
+// TPMA_STARTUP_CLEAR = 0 (every hierarchy disabled) and refused the device with
+// STATUS_DEVICE_PROTOCOL_ERROR.
+//
+// The check that matters is the tag: a windowed query must answer with the property that
+// was asked for, not the next one along.
+func TestVarPropertiesReportHierarchyState(t *testing.T) {
+	tpm := New()
+
+	read := func(property uint32) (tag, value uint32) {
+		t.Helper()
+		var w writer
+		tpm.writeProperties(&w, property, 1)
+		b := w.bytes()
+		be := func(o int) uint32 {
+			return uint32(b[o])<<24 | uint32(b[o+1])<<16 | uint32(b[o+2])<<8 | uint32(b[o+3])
+		}
+		if len(b) < 12 || be(0) != 1 {
+			t.Fatalf("GetCapability(TPM_PROPERTIES, %#x, 1) returned no property", property)
+		}
+		return be(4), be(8)
+	}
+
+	// Ascending order, and no duplicates — writeProperties selects on ">= property".
+	seen := map[uint32]bool{}
+	vp := tpm.varProperties()
+	for i, p := range vp {
+		if seen[p.property] {
+			t.Errorf("PT_VAR property %#x listed twice", p.property)
+		}
+		seen[p.property] = true
+		if i > 0 && p.property <= vp[i-1].property {
+			t.Fatalf("varProperties not ascending at index %d: %#x after %#x",
+				i, p.property, vp[i-1].property)
+		}
+	}
+
+	for _, p := range []uint32{PTPermanent, PTStartupClear, PTLockoutCounter,
+		PTMaxAuthFail, PTLockoutInterval, PTLockoutRecovery} {
+		if tag, _ := read(p); tag != p {
+			t.Errorf("query for %#x answered with tag %#x — a driver reading %#x gets the "+
+				"wrong property's value", p, tag, p)
+		}
+	}
+
+	// A freshly manufactured TPM has all four hierarchies enabled. This is the value the
+	// reference platform (which Windows accepts) reports: TPMA_STARTUP_CLEAR = 0xF.
+	_, suc := read(PTStartupClear)
+	if want := sucPHEnable | sucSHEnable | sucEHEnable | sucPHEnableNV; suc != want {
+		t.Errorf("TPMA_STARTUP_CLEAR = %#x, want %#x (all hierarchies enabled)", suc, want)
+	}
+	if suc&sucOrderly != 0 {
+		t.Error("TPMA_STARTUP_CLEAR claims orderly, but state is not persisted on Shutdown(STATE)")
+	}
+
+	// No authorization has been set on a fresh TPM, so only tpmGeneratedEPS is on.
+	_, perm := read(PTPermanent)
+	if perm != permTPMGeneratedEPS {
+		t.Errorf("TPMA_PERMANENT = %#x, want %#x on a fresh TPM", perm, permTPMGeneratedEPS)
+	}
+
+	// The flags must track live state, not be constants.
+	tpm.h.owner.enabled = false
+	tpm.h.disableClear = true
+	if _, suc := read(PTStartupClear); suc&sucSHEnable != 0 {
+		t.Error("TPMA_STARTUP_CLEAR still reports shEnable after the owner hierarchy was disabled")
+	}
+	if _, perm := read(PTPermanent); perm&permDisableClear == 0 {
+		t.Error("TPMA_PERMANENT does not report disableClear after ClearControl")
+	}
+}

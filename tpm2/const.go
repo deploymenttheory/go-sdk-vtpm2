@@ -519,6 +519,30 @@ const (
 	PTLockoutRecovery uint32 = ptVar + 0x011 // lockoutRecovery
 )
 
+// TPMA_PERMANENT attribute bits, the value of TPM_PT_PERMANENT (TPM 2.0 Part 2,
+// §8.9). Reports which authorizations have been set away from the Empty Buffer
+// and whether the TPM is in lockout.
+const (
+	permOwnerAuthSet       uint32 = 1 << 0
+	permEndorsementAuthSet uint32 = 1 << 1
+	permLockoutAuthSet     uint32 = 1 << 2
+	permDisableClear       uint32 = 1 << 8
+	permInLockout          uint32 = 1 << 9
+	permTPMGeneratedEPS    uint32 = 1 << 10
+)
+
+// TPMA_STARTUP_CLEAR attribute bits, the value of TPM_PT_STARTUP_CLEAR (TPM 2.0
+// Part 2, §8.10). The low four bits are the hierarchy enables — this is how a
+// driver learns the TPM's hierarchies are usable, so a TPM that does not report
+// this property reads as one with every hierarchy disabled.
+const (
+	sucPHEnable   uint32 = 1 << 0  // platform hierarchy enabled
+	sucSHEnable   uint32 = 1 << 1  // storage (owner) hierarchy enabled
+	sucEHEnable   uint32 = 1 << 2  // endorsement hierarchy enabled
+	sucPHEnableNV uint32 = 1 << 3  // platform NV enabled
+	sucOrderly    uint32 = 1 << 31 // NV state is orderly (clean shutdown)
+)
+
 // TPMA_ALGORITHM attribute bits (TPM_CAP_ALGS).
 const (
 	algAttrAsymmetric uint32 = 0x001

@@ -76,14 +76,3 @@ func (t *TPM) cmdDictionaryAttackParameters(tag uint16, r *reader) []byte {
 	t.da.failedTries = 0
 	return t.authResponse(ac, nil, nil)
 }
-
-// varProperties returns the run-time PT_VAR properties reported from live state,
-// in ascending tag order.
-func (t *TPM) varProperties() []taggedProperty {
-	return []taggedProperty{
-		{PTLockoutCounter, t.da.failedTries},
-		{PTMaxAuthFail, t.da.maxTries},
-		{PTLockoutInterval, t.da.recoveryTime},
-		{PTLockoutRecovery, t.da.lockoutRecovery},
-	}
-}
