@@ -66,15 +66,103 @@ var fixedProperties = []taggedProperty{
 	{PTMaxCapBuffer, 1024},
 }
 
+// varProperties returns the PT_VAR group — the run-time counterpart of
+// fixedProperties, reported from live state — in ascending tag order, which
+// writeProperties relies on.
+//
+// TPM_PT_PERMANENT and TPM_PT_STARTUP_CLEAR lead the group and are not optional.
+// Windows' tpm.sys reads TPM_PT_PERMANENT repeatedly during StartDevice and
+// TPM_PT_STARTUP_CLEAR once; because GetCapability returns the first property at
+// or after the requested tag, omitting them did not produce an error — a query for
+// 0x200 was answered with tag 0x20E (the lockout counter) and moreData=YES. The
+// driver therefore never learned that the hierarchies were enabled and refused the
+// device with STATUS_DEVICE_PROTOCOL_ERROR (CM_PROB_FAILED_START), while every
+// individual command still returned rc=0.
+func (t *TPM) varProperties() []taggedProperty {
+	var perm uint32
+	if len(t.h.owner.authValue) > 0 {
+		perm |= permOwnerAuthSet
+	}
+	if len(t.h.endorsement.authValue) > 0 {
+		perm |= permEndorsementAuthSet
+	}
+	if len(t.h.lockout.authValue) > 0 {
+		perm |= permLockoutAuthSet
+	}
+	if t.h.disableClear {
+		perm |= permDisableClear
+	}
+	if t.da.inLockout() {
+		perm |= permInLockout
+	}
+	// The endorsement primary seed is minted by newHierarchies/randomSeed rather
+	// than supplied by a manufacturer, so the EPS is always TPM-generated.
+	perm |= permTPMGeneratedEPS
+
+	// Orderly is left clear: the TPM does not yet persist state on
+	// TPM2_Shutdown(STATE), so it cannot honestly claim its NV is orderly. A
+	// hardware TPM reports the same after an unexpected power loss.
+	var suc uint32
+	if t.h.platform.enabled {
+		suc |= sucPHEnable
+	}
+	if t.h.owner.enabled {
+		suc |= sucSHEnable
+	}
+	if t.h.endorsement.enabled {
+		suc |= sucEHEnable
+	}
+	if t.h.phEnableNV {
+		suc |= sucPHEnableNV
+	}
+
+	return []taggedProperty{
+		{PTPermanent, perm},
+		{PTStartupClear, suc},
+		{PTLockoutCounter, t.da.failedTries},
+		{PTMaxAuthFail, t.da.maxTries},
+		{PTLockoutInterval, t.da.recoveryTime},
+		{PTLockoutRecovery, t.da.lockoutRecovery},
+	}
+}
+
 // advertisedAlgs is the ascending list of algorithms reported under
-// TPM_CAP_ALGS as TPMS_ALG_PROPERTY (alg id + TPMA_ALGORITHM). Only the hash
-// primitives are wired in today; symmetric/asymmetric algorithms join as the key
-// and session commands land.
+// TPM_CAP_ALGS as TPMS_ALG_PROPERTY (alg id + TPMA_ALGORITHM).
+//
+// The list must describe what the TPM actually implements. It previously named
+// only the four hashes, which understated the emulator badly: RSA, ECC and AES
+// keys are creatable and usable, but a caller enumerating TPM_CAP_ALGS was told
+// this TPM does no asymmetric and no symmetric cryptography at all — not a
+// PC Client TPM by any reading. Every entry below is backed by a dispatch path
+// (see management.go for object types, sign.go/asym.go for the schemes,
+// symcipher.go for the modes); nothing aspirational belongs here.
 var advertisedAlgs = []taggedProperty{
-	{uint32(AlgSHA1), algAttrHash},
-	{uint32(AlgSHA256), algAttrHash},
-	{uint32(AlgSHA384), algAttrHash},
-	{uint32(AlgSHA512), algAttrHash},
+	{uint32(AlgRSA), algAttrAsymmetric | algAttrObject},                                      // crypto.go, management.go
+	{uint32(AlgSHA1), algAttrHash},                                                           //
+	{uint32(AlgHMAC), algAttrHash | algAttrSigning},                                          // sequence.go cmdHMAC
+	{uint32(AlgAES), algAttrSymmetric | algAttrObject},                                       // symcipher.go
+	{uint32(AlgMGF1), algAttrHash | algAttrMethod},                                           // OAEP mask generation
+	{uint32(AlgKeyedHash), algAttrHash | algAttrObject | algAttrSigning | algAttrEncrypting}, // management.go
+	{uint32(AlgXOR), algAttrHash | algAttrSymmetric},                                         // protect.go parameter encryption
+	{uint32(AlgSHA256), algAttrHash},                                                         //
+	{uint32(AlgSHA384), algAttrHash},                                                         //
+	{uint32(AlgSHA512), algAttrHash},                                                         //
+	{uint32(AlgNull), 0},                                                                     //
+	{uint32(AlgRSASSA), algAttrAsymmetric | algAttrSigning},                                  // sign.go
+	{uint32(AlgRSAES), algAttrAsymmetric | algAttrEncrypting},                                // asym.go
+	{uint32(AlgRSAPSS), algAttrAsymmetric | algAttrSigning},                                  // sign.go
+	{uint32(AlgOAEP), algAttrAsymmetric | algAttrEncrypting},                                 // asym.go
+	{uint32(AlgECDSA), algAttrAsymmetric | algAttrSigning},                                   // sign.go
+	{uint32(AlgECDH), algAttrAsymmetric | algAttrMethod},                                     // ecc.go cmdECDHZGen
+	{uint32(AlgKDF1SP80056A), algAttrHash | algAttrMethod},                                   // crypto.go kdfe
+	{uint32(AlgKDF1SP800108), algAttrHash | algAttrMethod},                                   // crypto.go kdfa
+	{uint32(AlgECC), algAttrAsymmetric | algAttrObject},                                      // crypto.go, management.go
+	{uint32(AlgSymCipher), algAttrObject | algAttrSymmetric},                                 // management.go
+	{uint32(AlgCTR), algAttrSymmetric | algAttrEncrypting},                                   // symcipher.go
+	{uint32(AlgOFB), algAttrSymmetric | algAttrEncrypting},                                   //
+	{uint32(AlgCBC), algAttrSymmetric | algAttrEncrypting},                                   //
+	{uint32(AlgCFB), algAttrSymmetric | algAttrEncrypting},                                   //
+	{uint32(AlgECB), algAttrSymmetric | algAttrEncrypting},                                   //
 }
 
 // commandTable lists the implemented commands in ascending command-code order

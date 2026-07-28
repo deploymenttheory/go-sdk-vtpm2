@@ -294,10 +294,49 @@ func TestGetCapabilityAlgs(t *testing.T) {
 	if n != uint32(len(advertisedAlgs)) {
 		t.Fatalf("algorithm count = %d, want %d", n, len(advertisedAlgs))
 	}
-	alg := r.u16()
-	attrs := r.u32()
-	if r.err != nil || alg != AlgSHA1 || attrs&algAttrHash == 0 {
-		t.Fatalf("first alg = (0x%x, attrs 0x%x), want SHA1 with hash attr (err %v)", alg, attrs, r.err)
+	got := map[uint16]uint32{}
+	var prev uint16
+	for i := uint32(0); i < n; i++ {
+		alg := r.u16()
+		attrs := r.u32()
+		if r.err != nil {
+			t.Fatalf("truncated alg list at entry %d: %v", i, r.err)
+		}
+		// writeAlgs selects on ">= property" and truncates to count, so an
+		// out-of-order table silently drops algorithms from a windowed read.
+		if i > 0 && alg <= prev {
+			t.Fatalf("advertisedAlgs not ascending: 0x%x after 0x%x", alg, prev)
+		}
+		prev = alg
+		got[alg] = attrs
+	}
+	// The advertised set must cover what the TPM implements. An enumerating caller
+	// that finds no asymmetric or symmetric algorithm concludes this is not a
+	// PC Client TPM, however well every individual command behaves.
+	for _, w := range []struct {
+		alg  uint16
+		attr uint32
+		name string
+	}{
+		{AlgSHA1, algAttrHash, "SHA1"},
+		{AlgSHA256, algAttrHash, "SHA256"},
+		{AlgHMAC, algAttrSigning, "HMAC"},
+		{AlgRSA, algAttrAsymmetric, "RSA"},
+		{AlgECC, algAttrAsymmetric, "ECC"},
+		{AlgECDSA, algAttrSigning, "ECDSA"},
+		{AlgAES, algAttrSymmetric, "AES"},
+		{AlgCFB, algAttrSymmetric, "CFB"},
+		{AlgKeyedHash, algAttrObject, "KEYEDHASH"},
+		{AlgSymCipher, algAttrObject, "SYMCIPHER"},
+	} {
+		attrs, ok := got[w.alg]
+		if !ok {
+			t.Errorf("TPM_CAP_ALGS omits %s (0x%x), which the TPM implements", w.name, w.alg)
+			continue
+		}
+		if attrs&w.attr == 0 {
+			t.Errorf("%s advertised with attrs 0x%x, missing 0x%x", w.name, attrs, w.attr)
+		}
 	}
 }
 
