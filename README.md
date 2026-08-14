@@ -1,5 +1,12 @@
 # go-sdk-vtpm2
 
+[![GoDoc](https://pkg.go.dev/badge/github.com/deploymenttheory/go-sdk-vtpm2)](https://pkg.go.dev/github.com/deploymenttheory/go-sdk-vtpm2)
+[![License](https://img.shields.io/github/license/deploymenttheory/go-sdk-vtpm2)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/deploymenttheory/go-sdk-vtpm2)](https://go.dev/)
+[![Release](https://img.shields.io/github/v/release/deploymenttheory/go-sdk-vtpm2)](https://github.com/deploymenttheory/go-sdk-vtpm2/releases)
+[![codecov](https://codecov.io/gh/deploymenttheory/go-sdk-vtpm2/graph/badge.svg)](https://codecov.io/gh/deploymenttheory/go-sdk-vtpm2)
+![Status: GA](https://img.shields.io/badge/status-GA-green)
+
 **A pure-Go TPM 2.0 — no cgo, no `swtpm`, no `libtpms`.**
 
 `go-sdk-vtpm2` is a TPM 2.0 device implemented from scratch in Go: the command
